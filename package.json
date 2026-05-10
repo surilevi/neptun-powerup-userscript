@@ -1,5 +1,5 @@
 {
-  "name": "neptun-powerup",
+  "name": "neptun-powerup-userscript",
   "version": "3.1.2",
   "description": "Neptun helper userscript for course and exam workflows",
   "type": "module",
@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "author": "Neptun PowerUp! Contributors",
+  "author": "surilevi",
   "license": "MIT",
   "pnpm": {
     "onlyBuiltDependencies": [

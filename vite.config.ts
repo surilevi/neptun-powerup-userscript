@@ -11,7 +11,7 @@ export default defineConfig({
         namespace: 'npu',
         version: pkg.version,
         description: 'Neptun helper userscript for course and exam workflows',
-        author: 'Neptun PowerUp! Contributors',
+        author: 'surilevi',
         license: 'MIT',
         icon: 'https://www.google.com/s2/favicons?sz=64&domain=neptun.net',
         match: [

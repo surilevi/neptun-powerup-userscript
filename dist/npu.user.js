@@ -2,7 +2,7 @@
 // @name         Neptun PowerUp!
 // @namespace    npu
 // @version      3.1.2
-// @author       Neptun PowerUp! Contributors
+// @author       surilevi
 // @description  Neptun helper userscript for course and exam workflows
 // @license      MIT
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=neptun.net

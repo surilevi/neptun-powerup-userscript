@@ -12,13 +12,10 @@ Neptun PowerUp! helps with the parts of Neptun that usually mean repeating the s
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser.
 2. If you use Chrome or Edge, open the browser extensions page and enable Developer Mode so Tampermonkey can run userscripts.
-3. Build the userscript with `pnpm build`.
-4. Open [`dist/npu.user.js`](dist/npu.user.js) and install it in Tampermonkey.
+3. Open the public userscript build:
+   [dist/npu.user.js](https://github.com/surilevi/neptun-powerup-userscript/raw/main/dist/npu.user.js)
+4. Install the script in Tampermonkey.
 5. Open your university's Neptun portal. The NPU panel appears in the bottom-right corner.
-
-If you want to install directly from GitHub, use:
-
-- [dist/npu.user.js](https://github.com/surilevi/neptun-powerup-userscript/raw/main/dist/npu.user.js)
 
 ## Features
 
