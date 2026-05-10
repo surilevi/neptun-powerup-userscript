@@ -1,53 +1,54 @@
 # Neptun PowerUp!
 
-Magyar nyelvu Tampermonkey userscript, ami a Neptunban vegzett ismetlodo muveleteket gyorsitja.
+Magyar nyelvű Tampermonkey userscript Neptunhoz. A célja egyszerű: kevesebb ismétlődő kattintás, kevesebb kapkodás tárgyfelvételkor és vizsgajelentkezéskor.
 
-A projekt celja nem az, hogy mindent atvegyen helyetted, hanem hogy a faraszto kattintasokat es a versenyhelyzetben kellemetlen ujravegzeseket csokkentse. Jelenleg a fo funkciok a kurzusvalasztas mentese es visszatoltese, a gyors targyfelvetel, a mentett vizsgaidopontok gyors ujrajelentkezese, valamint a munkamenet eletben tartasa.
+A script nem helyetted dönt, és nem kerül meg Neptun-szabályokat. A már kiválasztott kurzusokat és vizsgaidőpontokat tudja elmenteni, visszatölteni, majd kérésre végigkattintani. Emellett próbálja életben tartani az aktív munkamenetet, hogy ritkábban dobjon ki a Neptun.
 
-> Fontos: a script automatizalja a Neptun egyes reszeit. Mindenki csak sajat felelossegere, a sajat intezmenye szabalyait figyelembe veve hasznalja.
+> Fontos: ez a projekt böngészőben futó automatizálást végez a Neptun felületén. Csak saját felelősségre használd, és vedd figyelembe a saját intézményed szabályait.
 
-## Mire jo?
+## Mire jó?
 
-- `Course Store`: elmented a kijelolt kurzusokat, majd kesobb visszatoltod oket.
-- `Course Rush`: a mentett targyvalasztast egy kattintassal visszatolti es vegigprobalja a felvetelt.
-- `Exam Quick Signup`: elmented a preferalt vizsgaidopontot, majd kesobb gyorsan ujrajelentkezel ra.
-- `Exam Rush`: a lathato vizsgaoldalon vegigprobalja a mentett vizsgacelokat.
-- `Infinite Session`: megprobalja eletben tartani a munkamenetet, hogy kevesebbszer dobjon ki a Neptun.
-- `Pink Mode`: opcionális kinezet testreszabas.
+- `Course Store`: elmenti a kijelölt kurzusokat, később pedig visszatölti őket.
+- `Course Rush`: a mentett tárgyválasztást visszatölti, majd sorban megpróbálja felvenni a tárgyakat.
+- `Exam Quick Signup`: elment egy választott vizsgaidőpontot, majd később egy kattintással megpróbál jelentkezni rá.
+- `Exam Rush`: az aktuálisan látható vizsgaoldalon végigpróbálja a mentett vizsgacélokat.
+- `Infinite Session`: megpróbálja frissen tartani a munkamenetet.
+- `Theme`: választható színkiemelés a Neptun felületén.
 
-## Telepites
+## Telepítés
 
-1. Telepitsd a [Tampermonkey](https://www.tampermonkey.net/) kiegeszitot.
-2. Nyisd meg a publikus buildet innen:
+1. Telepítsd a [Tampermonkey](https://www.tampermonkey.net/) böngészőbővítményt.
+2. Chrome vagy Edge alatt nyisd meg a böngésző bővítménykezelőjét, és kapcsold be a Fejlesztői módot, hogy a Tampermonkey futtatni tudja a userscripteket.
+3. Nyisd meg a publikus userscript buildet:
    [dist/npu.user.js](https://github.com/surilevi/neptun-powerup-userscript/raw/main/dist/npu.user.js)
-3. Telepitsd a scriptet Tampermonkey-be.
-4. Nyisd meg a sajat Neptun feluletedet. Az NPU panel a jobb also sarokban jelenik meg.
+4. Telepítsd a scriptet Tampermonkey-ben.
+5. Nyisd meg a saját Neptun felületedet. Az NPU panel a jobb alsó sarokban jelenik meg.
 
-## Tamasztott portalcsaladok
+## Támogatott portálútvonalak
 
-A userscript nem egyetlen hostnevre van behuzalozva, hanem a szokasos Neptun URL-csaladokra:
+A userscript nem konkrét egyetemi hostnevekre van bekötve. A gyakori Neptun hallgatói útvonalakat figyeli:
 
 - `/hallgatoi/*`
 - `/hallgato_ng/*`
 - `/hallgatoing/*`
 - `/ujhallgato/*`
 
-Ez azt jelenti, hogy tobb egyetemi telepitesen is mukodhet uj build nelkul, de a Neptun helyi testreszabasai tovabbra is okozhatnak kulonbsegeket.
+Emiatt több intézményi Neptun-telepítésen is működhet külön build nélkül. A helyi Neptun-testreszabások ettől még okozhatnak eltéréseket.
 
-## Korlatozasok
+## Korlátok
 
-- A script a jelenlegi Neptun Angular/Material DOM szerkezetere tamaszkodik. Egy UI-frissites konnyen eltörhet valamit.
-- A targy- es vizsgafelismeres heurisztikus. Kulonosen szokatlan helyi jeloleseknel kellhet utolagos finomhangolas.
-- A felveteli muveletek szandekosan szekvencialisak. A Neptun gyakran rosszul toleralja az egyszerre kilott parhuzamos kerelmeket.
-- A vizsgafunkciok a jelenleg megnyitott vizsgaoldalon dolgoznak. Nem navigalnak teljesen onalloan az osszes lehetseges oldal kozott.
+- A script a jelenlegi Neptun Angular/Material DOM-szerkezetére támaszkodik. Egy Neptun UI-frissítés eltörhet szelektorokat.
+- A tárgy- és vizsgafelismerés heurisztikus. Szokatlan helyi jelöléseknél szükség lehet finomhangolásra.
+- A felvételi műveletek szándékosan egymás után futnak. A Neptun gyakran rosszul kezeli a párhuzamos kéréseket.
+- A vizsgafunkciók az éppen megnyitott vizsgaoldalon dolgoznak. Nem járják be önállóan az összes tárgyat és vizsgaoldalt.
 
-## Adatkezeles
+## Adatkezelés
 
-- A script a sajat beallitasait es mentett valasztasait Tampermonkey taroloban tartja.
-- Felhasznalonevet es jelszot nem tarol tartosan.
-- Debug mod csak akkor aktiv, ha ezt kulon bekapcsolod.
+- A script a saját beállításait és mentett választásait Tampermonkey-tárhelyen tárolja.
+- Felhasználónevet és jelszót nem ment tartósan.
+- A részletes debug naplózás csak akkor aktív, ha külön bekapcsolod.
 
-## Fejlesztes
+## Fejlesztés
 
 ```bash
 pnpm install
@@ -56,23 +57,23 @@ pnpm test
 pnpm typecheck
 ```
 
-Ha reszletes debug informaciot szeretnel, a bongeszo konzolban allitsd be ezt:
+Részletes debug naplózáshoz állítsd be ezt a böngésző konzoljában:
 
 ```js
 localStorage.npu_debug = 'true'
 ```
 
-Kikapcsolashoz:
+Kikapcsoláshoz:
 
 ```js
 localStorage.npu_debug = 'false'
 ```
 
-## Jogi megjegyzes
+## Jogi megjegyzés
 
-A projekt automatizalt bongeszo-interakciokat vegez a Neptunban, ezert intezmenyi szabalyokba utkozhet. A hasznalat kovetkezmenyeiert mindenki maga felel.
+A projekt automatizált böngésző-interakciókat végez a Neptunban, ezért ütközhet intézményi szabályokkal. A használat következményeiért mindenki maga felel.
 
-Reszletesebb jogi szoveg: [LEGAL_NOTICE.md](LEGAL_NOTICE.md)
+Részletesebb jogi szöveg: [LEGAL_NOTICE.md](LEGAL_NOTICE.md)
 
 ## Licenc
 

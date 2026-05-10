@@ -1,7 +1,14 @@
 import { delay } from '../../utils/async'
 import { SESSION_STORAGE_KEYS } from '../../types/neptun-api'
 import { getApi, getIsEnrolling, setIsEnrolling } from './state'
-import { getSubjectPanels, isPanelExpanded, getCourseItems, isCourseSelected, extractSubjectCode, isEnrollButtonText } from './dom'
+import {
+  getSubjectPanels,
+  isPanelExpanded,
+  getCourseItems,
+  isCourseSelected,
+  extractSubjectCode,
+  isEnrollButtonText,
+} from './dom'
 import { loadSelections } from './storage'
 import { loadStoredSelections } from './load'
 import { waitForRequestComplete } from '../../utils/xhr'
@@ -23,7 +30,9 @@ async function ensureTokenFresh(): Promise<void> {
     const remaining = expiresAt - Date.now()
     api?.logger.info(`[enroll-debug] ensureTokenFresh: remaining=${Math.round(remaining / 1000)}s`)
     if (remaining < 30000) {
-      api?.logger.info('[enroll-debug] ensureTokenFresh: token expiring soon, triggering refresh...')
+      api?.logger.info(
+        '[enroll-debug] ensureTokenFresh: token expiring soon, triggering refresh...',
+      )
       const pathPrefix = window.location.pathname.split('/')[1] || 'hallgatoi'
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 5000)
@@ -57,7 +66,7 @@ export async function quickEnrollAll(): Promise<void> {
       const token = sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken)
       if (!token) {
         api?.logger.warn('no access_token in sessionStorage - session may have expired')
-        api?.statusPanel.addMessage('error', 'Session expired. Please log in again before enrolling.')
+        api?.statusPanel.addMessage('error', 'Session expired. Log in again before enrolling.')
         return
       }
     } catch (err) {
@@ -74,8 +83,8 @@ export async function quickEnrollAll(): Promise<void> {
     if (enrollable.length === 0) {
       const msg =
         panels.length === 0
-          ? 'No subjects listed. Search for subjects first, then Load your selections.'
-          : 'No subjects have courses selected. Click Load first to restore your saved selections.'
+          ? 'No subjects are listed. Search first, then load your saved courses.'
+          : 'No courses are selected. Load saved courses first, or select them manually.'
       api?.logger.warn(msg)
       api?.statusPanel.addMessage('warn', msg)
       return
@@ -84,7 +93,10 @@ export async function quickEnrollAll(): Promise<void> {
     // Check token freshness once before the batch
     await ensureTokenFresh()
 
-    api?.statusPanel.addMessage('info', `Enrolling ${enrollable.length} subject(s)...`)
+    api?.statusPanel.addMessage(
+      'info',
+      `Enrolling ${enrollable.length} subject${enrollable.length === 1 ? '' : 's'}...`,
+    )
 
     let enrolled = 0
     let failed = 0
@@ -92,8 +104,13 @@ export async function quickEnrollAll(): Promise<void> {
 
     for (const panel of enrollable) {
       const code = extractSubjectCode(panel) ?? '???'
-      api?.logger.info(`[enroll-debug] enrolling ${code} (${enrolled + failed + 1}/${enrollable.length})`)
-      api?.statusPanel.addMessage('info', `Enrolling ${code}... (${enrolled + failed + 1}/${enrollable.length})`)
+      api?.logger.info(
+        `[enroll-debug] enrolling ${code} (${enrolled + failed + 1}/${enrollable.length})`,
+      )
+      api?.statusPanel.addMessage(
+        'info',
+        `Enrolling ${code}... (${enrolled + failed + 1}/${enrollable.length})`,
+      )
 
       const enrollStartedAt = performance.now()
       if (!enrollSubject(panel, code)) {
@@ -105,7 +122,11 @@ export async function quickEnrollAll(): Promise<void> {
       // Wait for Angular's enrollment POST to complete.
       // Uses PerformanceObserver (browser-level API) because Tampermonkey's
       // sandbox prevents XHR prototype patching from intercepting page requests.
-      const requestResult = await waitForRequestComplete('SubjectApplication/SubjectSignin', 30_000, enrollStartedAt)
+      const requestResult = await waitForRequestComplete(
+        'SubjectApplication/SubjectSignin',
+        30_000,
+        enrollStartedAt,
+      )
 
       if (!requestResult.completed) {
         failed++
@@ -117,15 +138,21 @@ export async function quickEnrollAll(): Promise<void> {
       if (requestResult.status !== null && requestResult.status >= 400) {
         failed++
         errors.push(`${code}: server returned ${requestResult.status}`)
-        api?.logger.warn(`[enroll-debug] ${code}: enrollment request completed with status=${requestResult.status}`)
+        api?.logger.warn(
+          `[enroll-debug] ${code}: enrollment request completed with status=${requestResult.status}`,
+        )
         continue
       }
 
       enrolled++
       if (requestResult.status === null) {
-        api?.logger.info(`[enroll-debug] ${code}: enrollment request completed (status unavailable)`)
+        api?.logger.info(
+          `[enroll-debug] ${code}: enrollment request completed (status unavailable)`,
+        )
       } else {
-        api?.logger.info(`[enroll-debug] ${code}: enrollment request completed with status=${requestResult.status}`)
+        api?.logger.info(
+          `[enroll-debug] ${code}: enrollment request completed with status=${requestResult.status}`,
+        )
       }
     }
 
@@ -157,15 +184,15 @@ export async function loadAndEnroll(): Promise<void> {
   try {
     const selections = await loadSelections()
     if (Object.keys(selections).length === 0) {
-      api?.statusPanel.addMessage('warn', 'No saved selections to load. Save your courses first.')
+      api?.statusPanel.addMessage('warn', 'No saved course selections. Save courses first.')
       return
     }
 
-    api?.statusPanel.addMessage('info', 'Loading saved selections...')
+    api?.statusPanel.addMessage('info', 'Loading saved courses...')
     api?.statusPanel.expand()
     await loadStoredSelections()
 
-    api?.statusPanel.addMessage('info', 'Selections loaded - starting enrollment...')
+    api?.statusPanel.addMessage('info', 'Saved courses loaded. Starting enrollment...')
     await quickEnrollAll()
   } finally {
     isLoadAndEnrolling = false

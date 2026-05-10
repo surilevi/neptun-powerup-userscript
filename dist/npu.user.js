@@ -3,7 +3,7 @@
 // @namespace    npu
 // @version      3.1.2
 // @author       Neptun PowerUp! Contributors
-// @description  Quality-of-life userscript for Neptun student portals
+// @description  Neptun helper userscript for course and exam workflows
 // @license      MIT
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=neptun.net
 // @match        https://*/hallgato*/*
@@ -634,7 +634,7 @@ case "error":
       rushSection.appendChild(styleEl);
       const courseLabel = document.createElement("label");
       courseLabel.className = "npu-rush-toggle";
-      courseLabel.title = "When ON: after login, auto-redirects to registration page and enrolls saved courses";
+      courseLabel.title = "After login, open course registration and enroll saved courses";
       courseRushToggle = document.createElement("input");
       courseRushToggle.type = "checkbox";
       courseRushToggle.checked = courseRushOn;
@@ -653,7 +653,7 @@ case "error":
       rushSection.appendChild(courseLabel);
       const examLabel = document.createElement("label");
       examLabel.className = "npu-rush-toggle";
-      examLabel.title = "When ON: after login, auto-redirects to exam page and enrolls saved exam dates";
+      examLabel.title = "After login, open exams and enroll saved dates";
       examRushToggle = document.createElement("input");
       examRushToggle.type = "checkbox";
       examRushToggle.checked = examRushOn;
@@ -770,18 +770,18 @@ case "error":
       container.appendChild(themeRow);
       const legalHeader = document.createElement("div");
       legalHeader.style.cssText = `color: ${COLORS.accent}; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 16px; margin-bottom: 10px; padding-top: 12px; border-top: 1px solid ${COLORS.border};`;
-      legalHeader.textContent = "Legal";
+      legalHeader.textContent = "Consent";
       container.appendChild(legalHeader);
       const resetBtn = document.createElement("button");
       resetBtn.style.cssText = `padding: 5px 12px; background: transparent; color: ${COLORS.red}; border: 1px solid ${COLORS.red}; border-radius: 4px; cursor: pointer; font-size: 11px;`;
-      resetBtn.textContent = "Reset Consent";
+      resetBtn.textContent = "Show Consent Again";
       resetBtn.addEventListener("click", async () => {
         rushCallbacks?.onConsentReset?.();
-        resetBtn.textContent = "Consent reset!";
+        resetBtn.textContent = "Consent will show again";
         resetBtn.style.color = COLORS.green;
         resetBtn.style.borderColor = COLORS.green;
         setTimeout(() => {
-          resetBtn.textContent = "Reset Consent";
+          resetBtn.textContent = "Show Consent Again";
           resetBtn.style.color = COLORS.red;
           resetBtn.style.borderColor = COLORS.red;
         }, 2e3);
@@ -789,7 +789,7 @@ case "error":
       container.appendChild(resetBtn);
       const resetNote = document.createElement("div");
       resetNote.style.cssText = `font-size: 10px; color: #666; margin-top: 4px;`;
-      resetNote.textContent = "Shows the consent dialog again on next load";
+      resetNote.textContent = "The consent prompt appears on the next page load";
       container.appendChild(resetNote);
     }
     function notifyThemeChange() {
@@ -801,7 +801,8 @@ case "error":
       settingsVisible = !settingsVisible;
       if (normalContent) normalContent.style.display = settingsVisible ? "none" : "block";
       if (settingsContainer) settingsContainer.style.display = settingsVisible ? "block" : "none";
-      if (titleSpanRef) titleSpanRef.textContent = settingsVisible ? "⚙ Settings" : "Neptun PowerUp!";
+      if (titleSpanRef)
+        titleSpanRef.textContent = settingsVisible ? "⚙ Settings" : "Neptun PowerUp!";
     }
     function dotColor() {
       if (isFlashing) return COLORS.red;
@@ -844,7 +845,7 @@ case "error":
           sessionLine.style.color = COLORS.red;
           break;
         case "refreshing":
-          sessionLine.textContent = "Session: Refreshing...";
+          sessionLine.textContent = "Session: refreshing...";
           sessionLine.style.color = COLORS.yellow;
           break;
       }
@@ -1318,6 +1319,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   let unsubscribe = null;
   let visibilityHandler = null;
   let sessionModalObserver = null;
+  function normalizeMatchText(text) {
+    return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  }
   function getExistingTokenPayload() {
     try {
       const accessToken = sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken);
@@ -1326,9 +1330,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       if (!jwt) return null;
       const expiresAt = jwt.exp * 1e3;
       if (!Number.isFinite(expiresAt)) return null;
-      const refreshExpiration = sessionStorage.getItem(
-        SESSION_STORAGE_KEYS.refreshTokenExpiration
-      );
+      const refreshExpiration = sessionStorage.getItem(SESSION_STORAGE_KEYS.refreshTokenExpiration);
       let refreshExpiresAt = 0;
       if (refreshExpiration) {
         const parsed = Date.parse(refreshExpiration);
@@ -1359,10 +1361,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       if (!accessToken) return false;
       sessionStorage.setItem(SESSION_STORAGE_KEYS.accessToken, accessToken);
       if (refreshTokenExpiration) {
-        sessionStorage.setItem(
-          SESSION_STORAGE_KEYS.refreshTokenExpiration,
-          refreshTokenExpiration
-        );
+        sessionStorage.setItem(SESSION_STORAGE_KEYS.refreshTokenExpiration, refreshTokenExpiration);
       }
       const jwt = decodeJwt(accessToken);
       if (jwt) {
@@ -1466,7 +1465,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
             api$2?.bus.emit("token:expired", {});
           }
         } else {
-          api$2?.logger.warn(`[session-debug] refresh request returned unexpected status ${response.status}`);
+          api$2?.logger.warn(
+            `[session-debug] refresh request returned unexpected status ${response.status}`
+          );
           api$2?.logger.warn(`session refresh returned unexpected status: ${response.status}`);
         }
       } finally {
@@ -1495,7 +1496,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
             triggerKeepAlive();
           }, 1e4);
         } else {
-          api$2.logger.info(`token has only ${Math.round(remaining / 1e3)}s left, watchdog will handle`);
+          api$2.logger.info(
+            `token has only ${Math.round(remaining / 1e3)}s left, watchdog will handle`
+          );
         }
       }
     });
@@ -1538,7 +1541,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         `[session-debug] onVisibilityChange: tab visible, remaining=${Math.round(remaining / 1e3)}s, buffer=${REFRESH_BUFFER_S}s`
       );
       if (remaining <= REFRESH_BUFFER_MS) {
-        api$2.logger.info("[session-debug] onVisibilityChange: token near expiry, triggering keep-alive immediately");
+        api$2.logger.info(
+          "[session-debug] onVisibilityChange: token near expiry, triggering keep-alive immediately"
+        );
         triggerKeepAlive();
       }
     } catch (err) {
@@ -1552,34 +1557,16 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         ".cdk-overlay-container button, .mat-mdc-dialog-container button"
       );
       for (const btn of Array.from(overlayButtons)) {
-        const text = (btn.textContent ?? "").trim().toLowerCase();
-        const dialogText = btn.closest(".cdk-overlay-pane, .mat-mdc-dialog-container")?.textContent?.toLowerCase() ?? "";
-        const isSessionDialog = (dialogText.includes("session") || dialogText.includes("munkamenet")) && (dialogText.includes("lejĂˇr") || dialogText.includes("expir") || dialogText.includes("timeout") || dialogText.includes("idĹ‘tĂşllĂ©pĂ©s") || dialogText.includes("kijelentkezĂ©s") || /\d+\s*(perc|sec|mp|mĂˇsodperc)/.test(dialogText));
-        const isExtendButton = text === "ok" || text === "igen" || text.includes("extend") || text.includes("meghosszabbĂ­t") || text.includes("folytat") || text.includes("marad");
-        if (isSessionDialog && isExtendButton) {
-          api$2?.logger.info(`[session-debug] suppressing session timeout modal, clicking: ${text}`);
-          api$2?.statusPanel.addMessage("info", "Session timeout dialog auto-dismissed");
-          btn.click();
-          return;
-        }
-      }
-    });
-    sessionModalObserver.observe(document.body, { childList: true, subtree: true });
-  }
-  function suppressSessionTimeoutModalsV2() {
-    sessionModalObserver?.disconnect();
-    sessionModalObserver = new MutationObserver(() => {
-      const overlayButtons = document.querySelectorAll(
-        ".cdk-overlay-container button, .mat-mdc-dialog-container button"
-      );
-      for (const btn of Array.from(overlayButtons)) {
-        const text = (btn.textContent ?? "").trim().toLowerCase();
-        const dialogText = btn.closest(".cdk-overlay-pane, .mat-mdc-dialog-container")?.textContent?.toLowerCase() ?? "";
+        const rawText = (btn.textContent ?? "").trim();
+        const text = normalizeMatchText(rawText);
+        const dialogText = normalizeMatchText(
+          btn.closest(".cdk-overlay-pane, .mat-mdc-dialog-container")?.textContent ?? ""
+        );
         const isSessionDialog = (dialogText.includes("session") || dialogText.includes("munkamenet")) && (dialogText.includes("lejar") || dialogText.includes("expir") || dialogText.includes("timeout") || dialogText.includes("idotullepes") || dialogText.includes("kijelentkezes") || /\d+\s*(perc|sec|mp|masodperc)/.test(dialogText));
         const isExtendButton = text === "ok" || text === "igen" || text.includes("extend") || text.includes("meghosszabbit") || text.includes("folytat") || text.includes("marad");
         if (isSessionDialog && isExtendButton) {
-          api$2?.logger.info(`[session-debug] suppressing session timeout modal, clicking: ${text}`);
-          api$2?.statusPanel.addMessage("info", "Session timeout dialog auto-dismissed");
+          api$2?.logger.info(`[session-debug] suppressing session timeout modal, clicking: ${rawText}`);
+          api$2?.statusPanel.addMessage("info", "Session timeout dialog dismissed");
           btn.click();
           return;
         }
@@ -1590,7 +1577,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   const infiniteSessionModule = {
     id: "infinite-session",
     name: "Infinite Session",
-    description: "Keeps your Neptun session alive by triggering token refresh before JWT expires",
+    description: "Keeps the current Neptun session alive when possible",
     shouldActivate(_context) {
       return true;
     },
@@ -1600,7 +1587,6 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       visibilityHandler = onVisibilityChange;
       document.addEventListener("visibilitychange", visibilityHandler);
       suppressSessionTimeoutModals();
-      suppressSessionTimeoutModalsV2();
       hydrateFromSessionStorage();
       api$2.logger.info("initialized, waiting for token from sessionStorage watcher");
     },
@@ -2353,11 +2339,14 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     const subjectCodes = Object.keys(selections);
     if (subjectCodes.length === 0) {
       api2?.logger.info("no stored selections to load");
-      api2?.statusPanel.addMessage("info", "No stored selections found.");
+      api2?.statusPanel.addMessage("info", "No saved course selections found.");
       return;
     }
-    api2?.logger.info(`loading selections for ${subjectCodes.length} subject(s)`);
-    api2?.statusPanel.addMessage("info", `Loading selections for ${subjectCodes.length} subject(s)...`);
+    api2?.logger.info(`loading selections for ${subjectCodes.length} subjects`);
+    api2?.statusPanel.addMessage(
+      "info",
+      `Loading ${subjectCodes.length} saved subject${subjectCodes.length === 1 ? "" : "s"}...`
+    );
     api2?.logger.info(
       `[load-debug] loadStoredSelections: preparing to match ${subjectCodes.length} stored subjects on the live page`
     );
@@ -2422,10 +2411,10 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         api2?.statusPanel.addMessage("warn", `Selection mismatch: ${mismatchMsg}`);
       }
     }
-    api2?.logger.info(`loaded selections for ${loadedCount} / ${subjectCodes.length} subject(s)`);
+    api2?.logger.info(`loaded selections for ${loadedCount} / ${subjectCodes.length} subjects`);
     api2?.statusPanel.addMessage(
       "info",
-      `Loaded ${loadedCount} / ${subjectCodes.length} subject(s). Review, then Quick Enroll or enroll manually.`
+      `Loaded ${loadedCount}/${subjectCodes.length}. Review, then use Enroll Selected or enroll manually.`
     );
   }
   async function ensureTokenFresh() {
@@ -2440,7 +2429,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       const remaining = expiresAt - Date.now();
       api2?.logger.info(`[enroll-debug] ensureTokenFresh: remaining=${Math.round(remaining / 1e3)}s`);
       if (remaining < 3e4) {
-        api2?.logger.info("[enroll-debug] ensureTokenFresh: token expiring soon, triggering refresh...");
+        api2?.logger.info(
+          "[enroll-debug] ensureTokenFresh: token expiring soon, triggering refresh..."
+        );
         const pathPrefix = window.location.pathname.split("/")[1] || "hallgatoi";
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5e3);
@@ -2469,7 +2460,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         const token = sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken);
         if (!token) {
           api2?.logger.warn("no access_token in sessionStorage - session may have expired");
-          api2?.statusPanel.addMessage("error", "Session expired. Please log in again before enrolling.");
+          api2?.statusPanel.addMessage("error", "Session expired. Log in again before enrolling.");
           return;
         }
       } catch (err) {
@@ -2482,27 +2473,39 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         return items.some((item) => isCourseSelected(item));
       });
       if (enrollable.length === 0) {
-        const msg = panels.length === 0 ? "No subjects listed. Search for subjects first, then Load your selections." : "No subjects have courses selected. Click Load first to restore your saved selections.";
+        const msg = panels.length === 0 ? "No subjects are listed. Search first, then load your saved courses." : "No courses are selected. Load saved courses first, or select them manually.";
         api2?.logger.warn(msg);
         api2?.statusPanel.addMessage("warn", msg);
         return;
       }
       await ensureTokenFresh();
-      api2?.statusPanel.addMessage("info", `Enrolling ${enrollable.length} subject(s)...`);
+      api2?.statusPanel.addMessage(
+        "info",
+        `Enrolling ${enrollable.length} subject${enrollable.length === 1 ? "" : "s"}...`
+      );
       let enrolled = 0;
       let failed = 0;
       const errors = [];
       for (const panel of enrollable) {
         const code = extractSubjectCode(panel) ?? "???";
-        api2?.logger.info(`[enroll-debug] enrolling ${code} (${enrolled + failed + 1}/${enrollable.length})`);
-        api2?.statusPanel.addMessage("info", `Enrolling ${code}... (${enrolled + failed + 1}/${enrollable.length})`);
+        api2?.logger.info(
+          `[enroll-debug] enrolling ${code} (${enrolled + failed + 1}/${enrollable.length})`
+        );
+        api2?.statusPanel.addMessage(
+          "info",
+          `Enrolling ${code}... (${enrolled + failed + 1}/${enrollable.length})`
+        );
         const enrollStartedAt = performance.now();
         if (!enrollSubject(panel, code)) {
           failed++;
           errors.push(`${code}: enroll button not found`);
           continue;
         }
-        const requestResult = await waitForRequestComplete("SubjectApplication/SubjectSignin", 3e4, enrollStartedAt);
+        const requestResult = await waitForRequestComplete(
+          "SubjectApplication/SubjectSignin",
+          3e4,
+          enrollStartedAt
+        );
         if (!requestResult.completed) {
           failed++;
           errors.push(`${code}: timed out waiting for server response`);
@@ -2512,14 +2515,20 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         if (requestResult.status !== null && requestResult.status >= 400) {
           failed++;
           errors.push(`${code}: server returned ${requestResult.status}`);
-          api2?.logger.warn(`[enroll-debug] ${code}: enrollment request completed with status=${requestResult.status}`);
+          api2?.logger.warn(
+            `[enroll-debug] ${code}: enrollment request completed with status=${requestResult.status}`
+          );
           continue;
         }
         enrolled++;
         if (requestResult.status === null) {
-          api2?.logger.info(`[enroll-debug] ${code}: enrollment request completed (status unavailable)`);
+          api2?.logger.info(
+            `[enroll-debug] ${code}: enrollment request completed (status unavailable)`
+          );
         } else {
-          api2?.logger.info(`[enroll-debug] ${code}: enrollment request completed with status=${requestResult.status}`);
+          api2?.logger.info(
+            `[enroll-debug] ${code}: enrollment request completed with status=${requestResult.status}`
+          );
         }
       }
       let summary = `Done: ${enrolled} enrolled, ${failed} failed.`;
@@ -2543,13 +2552,13 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     try {
       const selections = await loadSelections();
       if (Object.keys(selections).length === 0) {
-        api2?.statusPanel.addMessage("warn", "No saved selections to load. Save your courses first.");
+        api2?.statusPanel.addMessage("warn", "No saved course selections. Save courses first.");
         return;
       }
-      api2?.statusPanel.addMessage("info", "Loading saved selections...");
+      api2?.statusPanel.addMessage("info", "Loading saved courses...");
       api2?.statusPanel.expand();
       await loadStoredSelections();
-      api2?.statusPanel.addMessage("info", "Selections loaded - starting enrollment...");
+      api2?.statusPanel.addMessage("info", "Saved courses loaded. Starting enrollment...");
       await quickEnrollAll();
     } finally {
       isLoadAndEnrolling = false;
@@ -2578,7 +2587,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       const headerText = (panel.querySelector("mat-expansion-panel-header")?.textContent ?? "").replace(/\s+/g, " ").trim().substring(0, 50);
       const courseItemCount = panel.querySelectorAll(".course-list-item-container").length;
       const selectedItemCount = panel.querySelectorAll(".course-list-item-container--selected").length;
-      api2?.logger.info(`[save-debug] panel "${headerText}": expanded=${expanded}, courses=${courseItemCount}, selected=${selectedItemCount}, classes=${panel.className.substring(0, 60)}`);
+      api2?.logger.info(
+        `[save-debug] panel "${headerText}": expanded=${expanded}, courses=${courseItemCount}, selected=${selectedItemCount}, classes=${panel.className.substring(0, 60)}`
+      );
       if (!expanded) continue;
       const code = extractSubjectCode(panel);
       api2?.logger.info(`[save-debug]   subjectCode=${code}`);
@@ -2588,7 +2599,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       for (const item of items) {
         const isSelected = isCourseSelected(item);
         const courseCode = extractCourseCode(item);
-        api2?.logger.info(`[save-debug]   course=${courseCode}, selected=${isSelected}, classes=${item.className.substring(0, 60)}`);
+        api2?.logger.info(
+          `[save-debug]   course=${courseCode}, selected=${isSelected}, classes=${item.className.substring(0, 60)}`
+        );
         if (isSelected && courseCode) {
           selectedCodes.push(courseCode);
         }
@@ -2596,19 +2609,25 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       if (selectedCodes.length > 0) {
         existing[code] = selectedCodes;
         newCount++;
-        api2?.logger.info(`[save-debug]   → saved ${selectedCodes.join(", ")} for ${code}`);
+        api2?.logger.info(`[save-debug] saved ${selectedCodes.join(", ")} for ${code}`);
       }
     }
     if (newCount === 0) {
       api2?.logger.warn("no selected courses found in expanded subjects");
-      api2?.statusPanel.addMessage("warn", "No selected courses found. Expand a subject and select courses first.");
+      api2?.statusPanel.addMessage(
+        "warn",
+        "No selected courses found. Expand a subject and select courses first."
+      );
       await renderModuleUI$1();
       return;
     }
     await saveSelections(existing);
     const totalSubjects = Object.keys(existing).length;
-    api2?.logger.info(`saved/updated ${newCount} subject(s), total stored: ${totalSubjects}`, existing);
-    api2?.statusPanel.addMessage("info", `Saved ${newCount} subject(s). Total stored: ${totalSubjects} subject(s).`);
+    api2?.logger.info(`saved/updated ${newCount} subjects, total stored: ${totalSubjects}`, existing);
+    api2?.statusPanel.addMessage(
+      "info",
+      `Saved ${newCount} subject${newCount === 1 ? "" : "s"}. Total stored: ${totalSubjects}.`
+    );
     await renderModuleUI$1();
   }
   const COURSE_UI_BUILD = "3.1.2 coursestore-select-a";
@@ -2643,7 +2662,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     btnContainer.style.cssText = "display: flex; flex-wrap: wrap; gap: 5px;";
     const saveBtn = document.createElement("button");
     saveBtn.style.cssText = `${btnStyle} background: #1565c0; color: white;`;
-    saveBtn.textContent = "Save selections";
+    saveBtn.textContent = "Save";
     saveBtn.addEventListener("click", () => {
       saveCurrentSelections().catch((err) => api2?.logger.error("save selections failed:", err));
     });
@@ -2653,7 +2672,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       const courseCount = Object.values(selections).reduce((sum, arr) => sum + arr.length, 0);
       const toggleBtn = document.createElement("button");
       toggleBtn.style.cssText = `${btnStyle} background: #37474f; color: white; margin-bottom: 4px;`;
-      toggleBtn.textContent = `View saved (${count} subj, ${courseCount} courses)`;
+      toggleBtn.textContent = `Saved (${count} subjects, ${courseCount} courses)`;
       const detailDiv = document.createElement("div");
       detailDiv.style.cssText = "display: none; margin: 4px 0 6px; padding: 5px 7px; background: #0f2040; border-radius: 4px; font-size: 10px; color: #8baae0; max-height: 120px; overflow-y: auto; width: 100%;";
       for (const [subj, courses] of Object.entries(selections)) {
@@ -2675,21 +2694,21 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       toggleBtn.addEventListener("click", () => {
         const isVisible = detailDiv.style.display !== "none";
         detailDiv.style.display = isVisible ? "none" : "block";
-        toggleBtn.textContent = isVisible ? `View saved (${count} subj, ${courseCount} courses)` : "Hide saved";
+        toggleBtn.textContent = isVisible ? `Saved (${count} subjects, ${courseCount} courses)` : "Hide saved";
       });
       container.appendChild(toggleBtn);
       container.appendChild(detailDiv);
       const loadBtn = document.createElement("button");
       loadBtn.style.cssText = `${btnStyle} background: #2e7d32; color: white;`;
-      loadBtn.textContent = "Load selections";
+      loadBtn.textContent = "Load";
       loadBtn.addEventListener("click", () => {
         loadStoredSelections().catch((err) => api2?.logger.error("load selections failed:", err));
       });
       btnContainer.appendChild(loadBtn);
       const loadEnrollBtn = document.createElement("button");
       loadEnrollBtn.style.cssText = `${btnStyle} background: #d84315; color: white; font-weight: bold;`;
-      loadEnrollBtn.textContent = "Load & Enroll";
-      loadEnrollBtn.title = "One click: load saved courses + enroll all subjects";
+      loadEnrollBtn.textContent = "Load + Enroll";
+      loadEnrollBtn.title = "Load saved courses, then enroll each subject";
       loadEnrollBtn.addEventListener("click", () => {
         if (getIsEnrolling()) return;
         loadAndEnroll().catch((err) => api2?.logger.error("load & enroll failed:", err));
@@ -2697,8 +2716,8 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       btnContainer.appendChild(loadEnrollBtn);
       const enrollBtn = document.createElement("button");
       enrollBtn.style.cssText = `${btnStyle} background: #e65100; color: white;`;
-      enrollBtn.textContent = "Quick Enroll";
-      enrollBtn.title = "Enroll subjects that already have courses selected";
+      enrollBtn.textContent = "Enroll Selected";
+      enrollBtn.title = "Enroll subjects with courses already selected";
       enrollBtn.addEventListener("click", () => {
         if (getIsEnrolling()) return;
         quickEnrollAll().catch((err) => api2?.logger.error("quick enroll failed:", err));
@@ -2706,7 +2725,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       btnContainer.appendChild(enrollBtn);
       const clearBtn = document.createElement("button");
       clearBtn.style.cssText = `${btnStyle} background: #c62828; color: white;`;
-      clearBtn.textContent = "Clear";
+      clearBtn.textContent = "Clear Saved";
       clearBtn.addEventListener("click", () => {
         handleClear().catch((err) => api2?.logger.error("clear selections failed:", err));
       });
@@ -2715,7 +2734,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     container.appendChild(btnContainer);
     const hint = document.createElement("div");
     hint.style.cssText = "margin-top: 6px; font-size: 10px; color: #6a7a8a;";
-    hint.textContent = "Expand subjects & select courses before saving.";
+    hint.textContent = "Expand subjects and select courses before saving.";
     container.appendChild(hint);
     if (debugEnabled) {
       const diagnosticsDiv = document.createElement("div");
@@ -2724,7 +2743,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       container.appendChild(diagnosticsDiv);
       const rushHintDiv = document.createElement("div");
       rushHintDiv.style.cssText = "margin-top: 4px; font-size: 10px; color: #6a7a8a;";
-      rushHintDiv.textContent = "Course Rush should auto-turn off after a run starts.";
+      rushHintDiv.textContent = "Course Rush turns off after a run starts.";
       container.appendChild(rushHintDiv);
     }
     api2.statusPanel.setModuleContentElement(container);
@@ -2739,7 +2758,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   const courseStoreModule = {
     id: "course-store",
     name: "Course Store",
-    description: "Save and restore course selections for quick re-registration",
+    description: "Save course selections and restore them later",
     shouldActivate(context) {
       return context.path.includes("/subjects/registration");
     },
@@ -2753,42 +2772,44 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         const courseCount = Object.values(selections).reduce((sum, arr) => sum + arr.length, 0);
         api2.statusPanel.addMessage(
           "info",
-          `${count} subject(s) with ${courseCount} course(s) stored. Click Load to restore.`
+          `${count} saved subject${count === 1 ? "" : "s"}, ${courseCount} course${courseCount === 1 ? "" : "s"}. Use Load to restore.`
         );
         api2.logger.info(`found ${count} stored subject selection(s)`);
       }
-      setRouteUnsub(api2.bus.on("page:changed", (payload) => {
-        if (payload.path.includes("/subjects/registration")) {
-          const currentApi = getApi$1();
-          if (!currentApi) return;
-          renderModuleUI$1().then(async () => {
-            const freshApi = getApi$1();
-            if (!freshApi) return;
-            const sel = await loadSelections();
-            const storedSubjects = Object.keys(sel).length;
-            if (storedSubjects > 0) {
-              const storedCourses = Object.values(sel).reduce((sum, arr) => sum + arr.length, 0);
-              freshApi.statusPanel.addMessage(
-                "info",
-                `${storedSubjects} subject(s) with ${storedCourses} course(s) stored. Click Load to restore.`
-              );
-            }
-          }).catch((err) => {
-            const freshApi = getApi$1();
-            const log = freshApi?.logger ?? console;
-            log.error("error in route change handler:", err);
-          });
-        }
-      }));
+      setRouteUnsub(
+        api2.bus.on("page:changed", (payload) => {
+          if (payload.path.includes("/subjects/registration")) {
+            const currentApi = getApi$1();
+            if (!currentApi) return;
+            renderModuleUI$1().then(async () => {
+              const freshApi = getApi$1();
+              if (!freshApi) return;
+              const sel = await loadSelections();
+              const storedSubjects = Object.keys(sel).length;
+              if (storedSubjects > 0) {
+                const storedCourses = Object.values(sel).reduce((sum, arr) => sum + arr.length, 0);
+                freshApi.statusPanel.addMessage(
+                  "info",
+                  `${storedSubjects} saved subject${storedSubjects === 1 ? "" : "s"}, ${storedCourses} course${storedCourses === 1 ? "" : "s"}. Use Load to restore.`
+                );
+              }
+            }).catch((err) => {
+              const freshApi = getApi$1();
+              const log = freshApi?.logger ?? console;
+              log.error("error in route change handler:", err);
+            });
+          }
+        })
+      );
       const autoSearchResult = await autoSearchSubjects();
       const rushOn = api2.statusPanel.getCourseRushMode();
       if (rushOn) {
         const rushSelections = await loadSelections();
         if (Object.keys(rushSelections).length > 0) {
           api2.logger.info("Course Rush Mode active - auto-triggering Load & Enroll");
-          api2.statusPanel.addMessage("info", "Rush Mode: auto-enrolling saved courses...");
+          api2.statusPanel.addMessage("info", "Course Rush is enrolling saved courses...");
           api2.statusPanel.setCourseRushMode(false);
-          api2.statusPanel.addMessage("info", "Course Rush triggered and turned off to avoid repeat runs.");
+          api2.statusPanel.addMessage("info", "Course Rush started and turned itself off.");
           let panelCount = getSubjectPanels().length;
           if (panelCount === 0) {
             const listingResult = await waitForSubjectListing({
@@ -2799,7 +2820,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
             panelCount = listingResult.panels;
             if (panelCount === 0) {
               if (listingResult.state === "request-failed" && listingResult.requestStatus !== null) {
-                api2.logger.warn(`Rush Mode: subject search failed with status ${listingResult.requestStatus}`);
+                api2.logger.warn(
+                  `Rush Mode: subject search failed with status ${listingResult.requestStatus}`
+                );
                 api2.statusPanel.addMessage(
                   "warn",
                   `Subject search failed (${listingResult.requestStatus}). Registration may not be open yet.`
@@ -2811,7 +2834,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
                   "Subject search completed, but no subjects were listed. Check filters or registration availability."
                 );
               } else {
-                api2.logger.warn("Rush Mode: timed out waiting for subject listing - cannot auto-enroll");
+                api2.logger.warn(
+                  "Rush Mode: timed out waiting for subject listing - cannot auto-enroll"
+                );
                 api2.statusPanel.addMessage(
                   "warn",
                   "Timed out waiting for subjects to load. Try refreshing and enabling Rush Mode again."
@@ -2822,7 +2847,10 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
           }
           if (panelCount === 0) {
             api2.logger.warn("Rush Mode: no subjects are listed - cannot auto-enroll");
-            api2.statusPanel.addMessage("warn", "No subjects loaded. Try refreshing and enabling Rush Mode again.");
+            api2.statusPanel.addMessage(
+              "warn",
+              "No subjects loaded. Try refreshing and enabling Rush Mode again."
+            );
             return;
           }
           loadAndEnroll().catch((err) => api2.logger.error("rush auto-enroll failed:", err));
@@ -3180,22 +3208,30 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     const { subjectCode, pref } = target;
     const info = resolveCurrentTargetInfo(target);
     if (!info) {
-      api2?.logger.warn(`[exam-enroll-debug] submitEnrollmentTarget: live row not found for ${subjectCode} ${pref.date}`);
-      api2?.statusPanel.addMessage("warn", `${subjectCode}: live exam row not found before clicking.`);
+      api2?.logger.warn(
+        `[exam-enroll-debug] submitEnrollmentTarget: live row not found for ${subjectCode} ${pref.date}`
+      );
+      api2?.statusPanel.addMessage("warn", `${subjectCode}: saved exam row is not visible.`);
       return { failed: true, submitted: false, shouldStop: false };
     }
     if (!info.felvetelBtn) {
-      api2?.logger.warn(`[exam-enroll-debug] submitEnrollmentTarget: button not found for ${subjectCode} ${pref.date}`);
-      api2?.statusPanel.addMessage("warn", `${subjectCode}: enrollment button not found.`);
+      api2?.logger.warn(
+        `[exam-enroll-debug] submitEnrollmentTarget: button not found for ${subjectCode} ${pref.date}`
+      );
+      api2?.statusPanel.addMessage("warn", `${subjectCode}: enrollment button is missing.`);
       return { failed: true, submitted: false, shouldStop: false };
     }
     if (!info.felvetelBtn.isConnected) {
-      api2?.logger.warn(`[exam-enroll-debug] submitEnrollmentTarget: button became detached for ${subjectCode} ${pref.date}`);
-      api2?.statusPanel.addMessage("warn", `${subjectCode}: enrollment button became detached before click.`);
+      api2?.logger.warn(
+        `[exam-enroll-debug] submitEnrollmentTarget: button became detached for ${subjectCode} ${pref.date}`
+      );
+      api2?.statusPanel.addMessage("warn", `${subjectCode}: enrollment button changed before click.`);
       return { failed: true, submitted: false, shouldStop: false };
     }
     if (info.felvetelBtn.disabled || info.felvetelBtn.hasAttribute("disabled")) {
-      api2?.logger.info(`[exam-enroll-debug] submitEnrollmentTarget: button disabled for ${subjectCode}`);
+      api2?.logger.info(
+        `[exam-enroll-debug] submitEnrollmentTarget: button disabled for ${subjectCode}`
+      );
       api2?.statusPanel.addMessage("warn", `${subjectCode}: registration button is disabled.`);
       return { failed: true, submitted: false, shouldStop: false };
     }
@@ -3203,13 +3239,20 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     if (capacityMatch) {
       const current = parseInt(capacityMatch[1], 10);
       const limit = parseInt(capacityMatch[2], 10);
-      api2?.logger.info(`[exam-enroll-debug] submitEnrollmentTarget: ${subjectCode} capacity ${current}/${limit}`);
+      api2?.logger.info(
+        `[exam-enroll-debug] submitEnrollmentTarget: ${subjectCode} capacity ${current}/${limit}`
+      );
       if (current >= limit) {
-        api2?.statusPanel.addMessage("warn", `${subjectCode}: saved exam is full (${current}/${limit}).`);
+        api2?.statusPanel.addMessage(
+          "warn",
+          `${subjectCode}: saved exam is full (${current}/${limit}).`
+        );
         return { failed: true, submitted: false, shouldStop: false };
       }
     }
-    api2?.logger.info(`[exam-enroll-debug] submitEnrollmentTarget: clicking Felvetel for ${subjectCode} ${pref.date}`);
+    api2?.logger.info(
+      `[exam-enroll-debug] submitEnrollmentTarget: clicking Felvétel for ${subjectCode} ${pref.date}`
+    );
     api2?.statusPanel.addMessage("info", `Auto-enrolling ${subjectCode}: ${pref.date}...`);
     api2?.statusPanel.expand();
     const requestStartedAt = performance.now();
@@ -3245,8 +3288,13 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       return { failed: false, submitted: false, shouldStop: true };
     }
     if (!requestResult.completed) {
-      api2?.logger.warn(`[exam-enroll-debug] submitEnrollmentTarget: no server response for ${subjectCode}`);
-      api2?.statusPanel.addMessage("warn", `${subjectCode}: no server response after clicking Felvetel.`);
+      api2?.logger.warn(
+        `[exam-enroll-debug] submitEnrollmentTarget: no server response for ${subjectCode}`
+      );
+      api2?.statusPanel.addMessage(
+        "warn",
+        `${subjectCode}: no server response after clicking Felvétel.`
+      );
       return { failed: true, submitted: false, shouldStop: false };
     }
     if (requestResult.status !== null && requestResult.status >= 400) {
@@ -3268,26 +3316,38 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     const prefs = await loadPreferences();
     if (Object.keys(prefs).length === 0) {
       api2?.logger.info("[exam-enroll-debug] autoEnrollSaved: no saved preferences found");
-      api2?.statusPanel.addMessage("info", "No saved exam preferences found.");
+      api2?.statusPanel.addMessage("info", "No saved exam dates found.");
       return;
     }
     const pageSubjectCode = getSubjectCode();
     const targets = findSavedExamTargets(prefs);
-    api2?.logger.info(`[exam-enroll-debug] autoEnrollSaved: found ${targets.length} saved targets on the current page`);
+    api2?.logger.info(
+      `[exam-enroll-debug] autoEnrollSaved: found ${targets.length} saved targets on the current page`
+    );
     if (targets.length === 0) {
       if (pageSubjectCode && prefs[pageSubjectCode]) {
-        api2?.logger.warn(`[exam-enroll-debug] autoEnrollSaved: saved exam date "${prefs[pageSubjectCode].date}" not found on current page`);
-        api2?.statusPanel.addMessage("warn", `Saved exam date "${prefs[pageSubjectCode].date}" not found on this page.`);
+        api2?.logger.warn(
+          `[exam-enroll-debug] autoEnrollSaved: saved exam date "${prefs[pageSubjectCode].date}" not found on current page`
+        );
+        api2?.statusPanel.addMessage(
+          "warn",
+          `Saved exam date "${prefs[pageSubjectCode].date}" not found on this page.`
+        );
       } else {
-        api2?.logger.info("[exam-enroll-debug] autoEnrollSaved: no saved exam targets visible on this page");
-        api2?.statusPanel.addMessage("info", "No saved exam targets are visible on this page.");
+        api2?.logger.info(
+          "[exam-enroll-debug] autoEnrollSaved: no saved exam targets visible on this page"
+        );
+        api2?.statusPanel.addMessage("info", "No saved exam dates are visible on this page.");
       }
       showRetryButton();
       return;
     }
-    api2?.statusPanel.addMessage("info", `Exam Rush: ${targets.length} saved target${targets.length === 1 ? "" : "s"} visible.`);
+    api2?.statusPanel.addMessage(
+      "info",
+      `Exam Rush: ${targets.length} saved target${targets.length === 1 ? "" : "s"} visible.`
+    );
     api2?.statusPanel.setExamRushMode(false);
-    api2?.statusPanel.addMessage("info", "Exam Rush triggered and turned off to avoid repeat runs.");
+    api2?.statusPanel.addMessage("info", "Exam Rush started and turned itself off.");
     let failedCount = 0;
     let submittedCount = 0;
     let stoppedEarly = false;
@@ -3326,7 +3386,10 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         `Exam Rush finished: ${submittedCount} submitted, ${failedCount} failed.`
       );
     } else {
-      api2?.statusPanel.addMessage("info", `Exam Rush submitted ${submittedCount} saved exam${submittedCount === 1 ? "" : "s"}.`);
+      api2?.statusPanel.addMessage(
+        "info",
+        `Exam Rush submitted ${submittedCount} saved exam${submittedCount === 1 ? "" : "s"}.`
+      );
     }
   }
   function showRetryButton() {
@@ -3336,7 +3399,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     const retryBtn = document.createElement("button");
     retryBtn.className = "npu-exam-retry-btn";
     retryBtn.style.cssText = "padding: 4px 12px; background: #e65100; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px; font-weight: bold; margin-top: 4px; display: block;";
-    retryBtn.textContent = "Retry Auto-Enroll";
+    retryBtn.textContent = "Retry Enrollment";
     retryBtn.addEventListener("click", () => {
       retryBtn.remove();
       autoEnrollSaved().catch((err) => api2?.logger.error("retry auto-enroll failed:", err));
@@ -3358,10 +3421,12 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     api2?.logger.info(`[exam-enroll-debug] findConfirmButton: ${buttons.length} buttons in overlay`);
     const btn = buttons.find((b) => {
       const text = (b.textContent ?? "").trim();
-      return /meger[oĹ‘]s[iĂ­]t/i.test(text) || text.includes("Igen") || text.includes("OK");
+      return /meger[oő]s[ií]t/i.test(text) || text.includes("Igen") || text.includes("OK");
     });
     if (btn) {
-      api2?.logger.info(`[exam-enroll-debug] findConfirmButton: matched button text="${(btn.textContent ?? "").trim().substring(0, 30)}"`);
+      api2?.logger.info(
+        `[exam-enroll-debug] findConfirmButton: matched button text="${(btn.textContent ?? "").trim().substring(0, 30)}"`
+      );
     }
     return btn ?? null;
   }
@@ -3373,13 +3438,17 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     while (Date.now() - start < timeoutMs) {
       const rowCount = getExamRows().length;
       if (rowCount > 0) {
-        api2?.logger.info(`[exam-enroll-debug] waitForExamTable: found ${rowCount} rows after ${pollCount} polls (${Date.now() - start}ms)`);
+        api2?.logger.info(
+          `[exam-enroll-debug] waitForExamTable: found ${rowCount} rows after ${pollCount} polls (${Date.now() - start}ms)`
+        );
         return true;
       }
       pollCount++;
       await delay(300);
     }
-    api2?.logger.warn(`[exam-enroll-debug] waitForExamTable: timed out after ${pollCount} polls (${timeoutMs}ms)`);
+    api2?.logger.warn(
+      `[exam-enroll-debug] waitForExamTable: timed out after ${pollCount} polls (${timeoutMs}ms)`
+    );
     return false;
   }
   const EXAM_UI_BUILD = "3.1.0 publish-prep-a";
@@ -3389,7 +3458,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     prefs[subjectCode] = { date, type, courseCode };
     await savePreferences(prefs);
     api2?.logger.info(`saved exam preference for ${subjectCode}: ${date}`);
-    api2?.statusPanel.addMessage("info", `Saved exam preference: ${date}`);
+    api2?.statusPanel.addMessage("info", `Saved exam date: ${date}`);
     await renderModuleUI();
   }
   async function clearPreference(subjectCode) {
@@ -3398,7 +3467,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     delete prefs[subjectCode];
     await savePreferences(prefs);
     api2?.logger.info(`cleared exam preference for ${subjectCode}`);
-    api2?.statusPanel.addMessage("info", "Exam preference cleared.");
+    api2?.statusPanel.addMessage("info", "Saved exam date cleared.");
     clearHighlights();
     await renderModuleUI();
   }
@@ -3426,12 +3495,12 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     if (currentPref) {
       const savedDiv = document.createElement("div");
       savedDiv.style.cssText = "padding: 4px 6px; background: #0f2040; border-radius: 3px; margin-bottom: 6px; color: #8baae0; font-size: 11px;";
-      savedDiv.textContent = `Saved: ${currentPref.date} (${subjectCode})`;
+      savedDiv.textContent = `Saved exam: ${currentPref.date} (${subjectCode})`;
       container.appendChild(savedDiv);
       const autoBtn = document.createElement("button");
       autoBtn.style.cssText = `${btnStyle} background: #d84315; color: white; font-weight: bold;`;
-      autoBtn.textContent = "Auto-Enroll Now";
-      autoBtn.title = "Click Felvétel on the saved exam date";
+      autoBtn.textContent = "Try Enroll";
+      autoBtn.title = "Click Felvétel for the saved exam date";
       autoBtn.addEventListener("click", () => {
         autoEnrollSaved().catch((err) => api2?.logger.error("auto-enroll failed:", err));
       });
@@ -3449,14 +3518,14 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     } else {
       const infoDiv = document.createElement("div");
       infoDiv.style.cssText = "color: #9e9e9e; margin-bottom: 6px;";
-      infoDiv.textContent = 'Click "Save" under the exam date to set your preferred date.';
+      infoDiv.textContent = "Use Save under an exam date to remember it.";
       container.appendChild(infoDiv);
     }
     const allPrefsEntries = Object.entries(prefs);
     if (allPrefsEntries.length > 0) {
       const toggleBtn = document.createElement("button");
       toggleBtn.style.cssText = `${btnStyle} background: #37474f; color: white; margin-top: 6px; display: block;`;
-      toggleBtn.textContent = `View all saved exams (${allPrefsEntries.length})`;
+      toggleBtn.textContent = `Saved exams (${allPrefsEntries.length})`;
       const allSavedDiv = document.createElement("div");
       allSavedDiv.style.cssText = "display: none; padding: 6px; background: #0f2040; border-radius: 3px; margin-top: 4px; max-height: 120px; overflow-y: auto; font-size: 11px; color: #8baae0;";
       for (const [code, pref] of allPrefsEntries) {
@@ -3482,7 +3551,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       toggleBtn.addEventListener("click", () => {
         const isVisible = allSavedDiv.style.display !== "none";
         allSavedDiv.style.display = isVisible ? "none" : "block";
-        toggleBtn.textContent = isVisible ? `View all saved exams (${allPrefsEntries.length})` : `Hide saved exams`;
+        toggleBtn.textContent = isVisible ? `Saved exams (${allPrefsEntries.length})` : `Hide saved exams`;
       });
       container.appendChild(toggleBtn);
       container.appendChild(allSavedDiv);
@@ -3501,7 +3570,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       container.appendChild(diagnosticsDiv);
       const overviewHintDiv = document.createElement("div");
       overviewHintDiv.style.cssText = "margin-top: 4px; font-size: 10px; color: #6a7a8a;";
-      overviewHintDiv.textContent = subjectCode ? `Current subject: ${subjectCode}` : "Overview mode: Exam Rush scans all visible subject tables for saved targets.";
+      overviewHintDiv.textContent = subjectCode ? `Current subject: ${subjectCode}` : "Exam Rush scans visible subject tables for saved targets.";
       container.appendChild(overviewHintDiv);
     }
     if (debugEnabled && subjectName) {
@@ -3515,7 +3584,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   const examSignupModule = {
     id: "exam-signup",
     name: "Exam Quick Signup",
-    description: "Save preferred exam dates and auto-enroll with one click",
+    description: "Save exam dates and try enrolling them from the current page",
     shouldActivate(context) {
       return /\/exams\/overview\/registration\/?$/.test(context.path);
     },
@@ -3539,7 +3608,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       const rushOn = api2.statusPanel.getExamRushMode();
       if (rushOn) {
         api2.logger.info("Exam Rush Mode active - scanning visible exam tables for saved targets");
-        api2.statusPanel.addMessage("info", "Rush Mode: scanning visible exam tables...");
+        api2.statusPanel.addMessage("info", "Scanning visible exam tables...");
         await delay(1e3);
         autoEnrollSaved().catch((err) => api2.logger.error("rush exam auto-enroll failed:", err));
       }
@@ -3611,15 +3680,15 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       dialog.appendChild(titleSection);
       const ackParagraph = document.createElement("div");
       ackParagraph.style.cssText = "font-size: 13px; color: #bbb; margin-bottom: 14px;";
-      ackParagraph.textContent = "By using this tool, you acknowledge that it:";
+      ackParagraph.textContent = "Before using NPU, please confirm that you understand what it does:";
       dialog.appendChild(ackParagraph);
       const bulletList = document.createElement("ul");
       bulletList.style.cssText = "font-size: 12px; color: #ccc; line-height: 1.8; padding-left: 18px; margin: 0 0 16px 0;";
       const bullets = [
-        { bold: "Maintains your session", rest: " by refreshing the active Neptun session before it expires" },
-        { bold: "Automates course enrollment", rest: " by clicking buttons and filling forms on your behalf" },
-        { bold: "Automates exam signup", rest: " by enrolling for saved exam dates on your behalf" },
-        { bold: "May violate", rest: " your university's acceptable use policy" }
+        { bold: "Keeps the session alive", rest: " by refreshing active Neptun tokens" },
+        { bold: "Clicks course controls", rest: " when you ask it to enroll saved selections" },
+        { bold: "Clicks exam controls", rest: " when you ask it to enroll saved exam dates" },
+        { bold: "May conflict with rules", rest: " at your university or faculty" }
       ];
       for (const bullet of bullets) {
         const li = document.createElement("li");
@@ -3633,13 +3702,13 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       dialog.appendChild(bulletList);
       const liabilityBox = document.createElement("div");
       liabilityBox.style.cssText = "font-size: 11px; color: #9e9e9e; margin-bottom: 18px; padding: 8px 10px; background: #1a1a2e; border-radius: 6px; border-left: 3px solid #ff9800;";
-      liabilityBox.textContent = "You are solely responsible for compliance with your university's policies. The authors accept no liability.";
+      liabilityBox.textContent = "Use it only if it is allowed for your account. You are responsible for the result.";
       dialog.appendChild(liabilityBox);
       const btnContainer = document.createElement("div");
       btnContainer.style.cssText = "display: flex; gap: 10px; justify-content: center;";
       const acceptBtn = document.createElement("button");
       acceptBtn.style.cssText = "padding: 8px 28px; background: #5c9eff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;";
-      acceptBtn.textContent = "I Accept";
+      acceptBtn.textContent = "Accept";
       const declineBtn = document.createElement("button");
       declineBtn.style.cssText = "padding: 8px 28px; background: transparent; color: #9e9e9e; border: 1px solid #2a2a4a; border-radius: 6px; cursor: pointer; font-size: 13px;";
       declineBtn.textContent = "Decline";
@@ -3648,7 +3717,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       dialog.appendChild(btnContainer);
       const footerNote = document.createElement("div");
       footerNote.style.cssText = "text-align: center; margin-top: 12px; font-size: 10px; color: #666;";
-      footerNote.textContent = "This prompt only appears once. You can reset it in Settings.";
+      footerNote.textContent = "You can show this prompt again from Settings.";
       dialog.appendChild(footerNote);
       overlay.appendChild(dialog);
       function cleanup(accepted) {
@@ -3709,10 +3778,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     }
     logger.info(`domain: ${domain}, path: ${buildContext().path}`);
     const bus = createEventBus();
-    const rushStorage = createStorageService(
-      gmStorage,
-      domain
-    );
+    const rushStorage = createStorageService(gmStorage, domain);
     const consentAccepted = await hasConsent(rushStorage);
     if (!consentAccepted) {
       const version = typeof GM !== "undefined" && GM.info?.script?.version ? GM.info.script.version : "dev";
@@ -3737,38 +3803,35 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     const savedThemeSettings = await rushStorage.getForDomain("themeSettings");
     const themeInitial = savedThemeSettings ?? { ...DEFAULT_THEME };
     logger.info(`rush mode initial state — course: ${courseRushInitial}, exam: ${examRushInitial}`);
-    const statusPanel = createStatusPanel(bus, {
-      onCourseRushChange: (on) => {
-        rushStorage.set("courseRushMode", on).catch(
-          (err) => logger.error("failed to persist courseRushMode:", err)
-        );
-        logger.info(`Course Rush Mode ${on ? "ON" : "OFF"}`);
-        statusPanel.addMessage("info", `Course Rush Mode ${on ? "enabled" : "disabled"}`);
+    const statusPanel = createStatusPanel(
+      bus,
+      {
+        onCourseRushChange: (on) => {
+          rushStorage.set("courseRushMode", on).catch((err) => logger.error("failed to persist courseRushMode:", err));
+          logger.info(`Course Rush Mode ${on ? "ON" : "OFF"}`);
+          statusPanel.addMessage("info", `Course Rush ${on ? "on" : "off"}`);
+        },
+        onExamRushChange: (on) => {
+          rushStorage.set("examRushMode", on).catch((err) => logger.error("failed to persist examRushMode:", err));
+          logger.info(`Exam Rush Mode ${on ? "ON" : "OFF"}`);
+          statusPanel.addMessage("info", `Exam Rush ${on ? "on" : "off"}`);
+        },
+        onConsentReset: () => {
+          resetConsent(rushStorage).catch((err) => logger.error("failed to reset consent:", err));
+          logger.info("Consent reset — dialog will appear on next load");
+          statusPanel.addMessage("info", "Consent prompt will appear on the next page load.");
+        },
+        onThemeChange: (settings) => {
+          rushStorage.setForDomain("themeSettings", settings).catch((err) => logger.error("failed to persist themeSettings:", err));
+          logger.info(`Theme ${settings.enabled ? `enabled (${settings.color})` : "disabled"}`);
+        }
       },
-      onExamRushChange: (on) => {
-        rushStorage.set("examRushMode", on).catch(
-          (err) => logger.error("failed to persist examRushMode:", err)
-        );
-        logger.info(`Exam Rush Mode ${on ? "ON" : "OFF"}`);
-        statusPanel.addMessage("info", `Exam Rush Mode ${on ? "enabled" : "disabled"}`);
+      {
+        courseRush: courseRushInitial,
+        examRush: examRushInitial
       },
-      onConsentReset: () => {
-        resetConsent(rushStorage).catch(
-          (err) => logger.error("failed to reset consent:", err)
-        );
-        logger.info("Consent reset — dialog will appear on next load");
-        statusPanel.addMessage("info", "Consent reset. Dialog will appear on next page load.");
-      },
-      onThemeChange: (settings) => {
-        rushStorage.setForDomain("themeSettings", settings).catch(
-          (err) => logger.error("failed to persist themeSettings:", err)
-        );
-        logger.info(`Theme ${settings.enabled ? `enabled (${settings.color})` : "disabled"}`);
-      }
-    }, {
-      courseRush: courseRushInitial,
-      examRush: examRushInitial
-    }, themeInitial);
+      themeInitial
+    );
     const stopInterceptor = setupInterceptor(bus, createLogger("interceptor"));
     const registry = createModuleRegistry(bus, gmStorage, statusPanel);
     registry.register(infiniteSessionModule);
@@ -3789,14 +3852,14 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         const examRush = statusPanel.getExamRushMode();
         if (courseRush) {
           logger.info("Course Rush Mode: redirecting to registration page after login");
-          statusPanel.addMessage("info", "Rush Mode: redirecting to course registration...");
+          statusPanel.addMessage("info", "Opening course registration for Course Rush...");
           registry.disposeAll();
           const pathPrefix = window.location.pathname.split("/")[1] || "hallgatoi";
           window.location.href = `${window.location.origin}/${pathPrefix}/subjects/registration`;
           return;
         } else if (examRush) {
           logger.info("Exam Rush Mode: redirecting to exam overview after login");
-          statusPanel.addMessage("info", "Rush Mode: redirecting to exam overview...");
+          statusPanel.addMessage("info", "Opening exam overview for Exam Rush...");
           registry.disposeAll();
           const pathPrefix = window.location.pathname.split("/")[1] || "hallgatoi";
           window.location.href = `${window.location.origin}/${pathPrefix}/exams/overview/registration`;

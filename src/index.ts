@@ -71,19 +71,15 @@ async function main(): Promise<void> {
   const bus = createEventBus()
 
   // Set up rush mode persistence via a global storage service (not domain-scoped)
-  const rushStorage = createStorageService(
-    gmStorage,
-    domain,
-  )
+  const rushStorage = createStorageService(gmStorage, domain)
 
   // --- Consent gate ---
   // Check if user has accepted the consent dialog for this domain.
   // If not, show it and wait. If declined, exit — no NPU features activate.
   const consentAccepted = await hasConsent(rushStorage)
   if (!consentAccepted) {
-    const version = (typeof GM !== 'undefined' && GM.info?.script?.version)
-      ? GM.info.script.version
-      : 'dev'
+    const version =
+      typeof GM !== 'undefined' && GM.info?.script?.version ? GM.info.script.version : 'dev'
     const accepted = await showConsentDialog(version)
     if (accepted) {
       await storeConsent(rushStorage)
@@ -114,38 +110,41 @@ async function main(): Promise<void> {
   logger.info(`rush mode initial state — course: ${courseRushInitial}, exam: ${examRushInitial}`)
 
   // Create unified status panel with rush mode wiring
-  const statusPanel = createStatusPanel(bus, {
-    onCourseRushChange: (on) => {
-      rushStorage.set('courseRushMode', on).catch((err) =>
-        logger.error('failed to persist courseRushMode:', err),
-      )
-      logger.info(`Course Rush Mode ${on ? 'ON' : 'OFF'}`)
-      statusPanel.addMessage('info', `Course Rush Mode ${on ? 'enabled' : 'disabled'}`)
+  const statusPanel = createStatusPanel(
+    bus,
+    {
+      onCourseRushChange: (on) => {
+        rushStorage
+          .set('courseRushMode', on)
+          .catch((err) => logger.error('failed to persist courseRushMode:', err))
+        logger.info(`Course Rush Mode ${on ? 'ON' : 'OFF'}`)
+        statusPanel.addMessage('info', `Course Rush ${on ? 'on' : 'off'}`)
+      },
+      onExamRushChange: (on) => {
+        rushStorage
+          .set('examRushMode', on)
+          .catch((err) => logger.error('failed to persist examRushMode:', err))
+        logger.info(`Exam Rush Mode ${on ? 'ON' : 'OFF'}`)
+        statusPanel.addMessage('info', `Exam Rush ${on ? 'on' : 'off'}`)
+      },
+      onConsentReset: () => {
+        resetConsent(rushStorage).catch((err) => logger.error('failed to reset consent:', err))
+        logger.info('Consent reset — dialog will appear on next load')
+        statusPanel.addMessage('info', 'Consent prompt will appear on the next page load.')
+      },
+      onThemeChange: (settings) => {
+        rushStorage
+          .setForDomain('themeSettings', settings)
+          .catch((err) => logger.error('failed to persist themeSettings:', err))
+        logger.info(`Theme ${settings.enabled ? `enabled (${settings.color})` : 'disabled'}`)
+      },
     },
-    onExamRushChange: (on) => {
-      rushStorage.set('examRushMode', on).catch((err) =>
-        logger.error('failed to persist examRushMode:', err),
-      )
-      logger.info(`Exam Rush Mode ${on ? 'ON' : 'OFF'}`)
-      statusPanel.addMessage('info', `Exam Rush Mode ${on ? 'enabled' : 'disabled'}`)
+    {
+      courseRush: courseRushInitial,
+      examRush: examRushInitial,
     },
-    onConsentReset: () => {
-      resetConsent(rushStorage).catch((err) =>
-        logger.error('failed to reset consent:', err),
-      )
-      logger.info('Consent reset — dialog will appear on next load')
-      statusPanel.addMessage('info', 'Consent reset. Dialog will appear on next page load.')
-    },
-    onThemeChange: (settings) => {
-      rushStorage.setForDomain('themeSettings', settings).catch((err) =>
-        logger.error('failed to persist themeSettings:', err),
-      )
-      logger.info(`Theme ${settings.enabled ? `enabled (${settings.color})` : 'disabled'}`)
-    },
-  }, {
-    courseRush: courseRushInitial,
-    examRush: examRushInitial,
-  }, themeInitial)
+    themeInitial,
+  )
 
   // Start monitoring sessionStorage for token changes
   const stopInterceptor = setupInterceptor(bus, createLogger('interceptor'))
@@ -182,7 +181,7 @@ async function main(): Promise<void> {
 
       if (courseRush) {
         logger.info('Course Rush Mode: redirecting to registration page after login')
-        statusPanel.addMessage('info', 'Rush Mode: redirecting to course registration...')
+        statusPanel.addMessage('info', 'Opening course registration for Course Rush...')
         registry.disposeAll()
         // Full navigation — Angular will initialize fresh on the new page
         const pathPrefix = window.location.pathname.split('/')[1] || 'hallgatoi'
@@ -190,7 +189,7 @@ async function main(): Promise<void> {
         return
       } else if (examRush) {
         logger.info('Exam Rush Mode: redirecting to exam overview after login')
-        statusPanel.addMessage('info', 'Rush Mode: redirecting to exam overview...')
+        statusPanel.addMessage('info', 'Opening exam overview for Exam Rush...')
         registry.disposeAll()
         const pathPrefix = window.location.pathname.split('/')[1] || 'hallgatoi'
         window.location.href = `${window.location.origin}/${pathPrefix}/exams/overview/registration`

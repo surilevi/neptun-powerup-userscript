@@ -1,18 +1,30 @@
 import { getApi } from './state'
-import { getSubjectCode, getSubjectName, highlightSavedRow, clearHighlights, addSaveButtonsToRows, watchTableForReRenders } from './dom'
+import {
+  getSubjectCode,
+  getSubjectName,
+  highlightSavedRow,
+  clearHighlights,
+  addSaveButtonsToRows,
+  watchTableForReRenders,
+} from './dom'
 import { loadPreferences, savePreferences } from './storage'
 import { autoEnrollSaved } from './enroll'
 import { isDebugEnabled } from '../../utils/debug'
 
 const EXAM_UI_BUILD = '3.1.0 publish-prep-a'
 
-async function savePreferredExam(subjectCode: string, date: string, type: string, courseCode: string): Promise<void> {
+async function savePreferredExam(
+  subjectCode: string,
+  date: string,
+  type: string,
+  courseCode: string,
+): Promise<void> {
   const api = getApi()
   const prefs = await loadPreferences()
   prefs[subjectCode] = { date, type, courseCode }
   await savePreferences(prefs)
   api?.logger.info(`saved exam preference for ${subjectCode}: ${date}`)
-  api?.statusPanel.addMessage('info', `Saved exam preference: ${date}`)
+  api?.statusPanel.addMessage('info', `Saved exam date: ${date}`)
   await renderModuleUI()
 }
 
@@ -22,7 +34,7 @@ async function clearPreference(subjectCode: string): Promise<void> {
   delete prefs[subjectCode]
   await savePreferences(prefs)
   api?.logger.info(`cleared exam preference for ${subjectCode}`)
-  api?.statusPanel.addMessage('info', 'Exam preference cleared.')
+  api?.statusPanel.addMessage('info', 'Saved exam date cleared.')
   clearHighlights()
   await renderModuleUI()
 }
@@ -42,7 +54,8 @@ export async function renderModuleUI(): Promise<void> {
 
   if (debugEnabled) {
     const buildDiv = document.createElement('div')
-    buildDiv.style.cssText = 'margin-top: -2px; margin-bottom: 6px; font-size: 10px; color: #6a7a8a;'
+    buildDiv.style.cssText =
+      'margin-top: -2px; margin-bottom: 6px; font-size: 10px; color: #6a7a8a;'
     buildDiv.textContent = `Build: ${EXAM_UI_BUILD}`
     container.appendChild(buildDiv)
   }
@@ -52,26 +65,25 @@ export async function renderModuleUI(): Promise<void> {
   const prefs = await loadPreferences()
   const currentPref = subjectCode ? prefs[subjectCode] : null
 
-  const btnStyle = 'padding: 4px 10px; border: none; border-radius: 3px; cursor: pointer; font-size: 11px; margin: 2px;'
+  const btnStyle =
+    'padding: 4px 10px; border: none; border-radius: 3px; cursor: pointer; font-size: 11px; margin: 2px;'
 
   if (currentPref) {
-    // Show saved preference
     const savedDiv = document.createElement('div')
-    savedDiv.style.cssText = 'padding: 4px 6px; background: #0f2040; border-radius: 3px; margin-bottom: 6px; color: #8baae0; font-size: 11px;'
-    savedDiv.textContent = `Saved: ${currentPref.date} (${subjectCode})`
+    savedDiv.style.cssText =
+      'padding: 4px 6px; background: #0f2040; border-radius: 3px; margin-bottom: 6px; color: #8baae0; font-size: 11px;'
+    savedDiv.textContent = `Saved exam: ${currentPref.date} (${subjectCode})`
     container.appendChild(savedDiv)
 
-    // Auto-enroll button
     const autoBtn = document.createElement('button')
     autoBtn.style.cssText = `${btnStyle} background: #d84315; color: white; font-weight: bold;`
-    autoBtn.textContent = 'Auto-Enroll Now'
-    autoBtn.title = 'Click Felvétel on the saved exam date'
+    autoBtn.textContent = 'Try Enroll'
+    autoBtn.title = 'Click Felvétel for the saved exam date'
     autoBtn.addEventListener('click', () => {
       autoEnrollSaved().catch((err) => api?.logger.error('auto-enroll failed:', err))
     })
     container.appendChild(autoBtn)
 
-    // Clear button
     const clearBtn = document.createElement('button')
     clearBtn.style.cssText = `${btnStyle} background: #c62828; color: white;`
     clearBtn.textContent = 'Clear'
@@ -85,22 +97,21 @@ export async function renderModuleUI(): Promise<void> {
     // Highlight the saved row
     highlightSavedRow(currentPref)
   } else {
-    // No saved preference — show instruction
     const infoDiv = document.createElement('div')
     infoDiv.style.cssText = 'color: #9e9e9e; margin-bottom: 6px;'
-    infoDiv.textContent = 'Click "Save" under the exam date to set your preferred date.'
+    infoDiv.textContent = 'Use Save under an exam date to remember it.'
     container.appendChild(infoDiv)
   }
 
-  // "View All Saved Exams" toggle
   const allPrefsEntries = Object.entries(prefs)
   if (allPrefsEntries.length > 0) {
     const toggleBtn = document.createElement('button')
     toggleBtn.style.cssText = `${btnStyle} background: #37474f; color: white; margin-top: 6px; display: block;`
-    toggleBtn.textContent = `View all saved exams (${allPrefsEntries.length})`
+    toggleBtn.textContent = `Saved exams (${allPrefsEntries.length})`
 
     const allSavedDiv = document.createElement('div')
-    allSavedDiv.style.cssText = 'display: none; padding: 6px; background: #0f2040; border-radius: 3px; margin-top: 4px; max-height: 120px; overflow-y: auto; font-size: 11px; color: #8baae0;'
+    allSavedDiv.style.cssText =
+      'display: none; padding: 6px; background: #0f2040; border-radius: 3px; margin-top: 4px; max-height: 120px; overflow-y: auto; font-size: 11px; color: #8baae0;'
 
     for (const [code, pref] of allPrefsEntries) {
       const row = document.createElement('div')
@@ -115,7 +126,8 @@ export async function renderModuleUI(): Promise<void> {
       row.appendChild(text)
 
       const removeBtn = document.createElement('button')
-      removeBtn.style.cssText = 'margin-left: 8px; padding: 1px 6px; background: #c62828; color: white; border: none; border-radius: 2px; cursor: pointer; font-size: 10px;'
+      removeBtn.style.cssText =
+        'margin-left: 8px; padding: 1px 6px; background: #c62828; color: white; border: none; border-radius: 2px; cursor: pointer; font-size: 10px;'
       removeBtn.textContent = 'x'
       removeBtn.title = `Remove saved exam for ${code}`
       removeBtn.addEventListener('click', () => {
@@ -130,7 +142,7 @@ export async function renderModuleUI(): Promise<void> {
       const isVisible = allSavedDiv.style.display !== 'none'
       allSavedDiv.style.display = isVisible ? 'none' : 'block'
       toggleBtn.textContent = isVisible
-        ? `View all saved exams (${allPrefsEntries.length})`
+        ? `Saved exams (${allPrefsEntries.length})`
         : `Hide saved exams`
     })
 
@@ -159,7 +171,7 @@ export async function renderModuleUI(): Promise<void> {
     overviewHintDiv.style.cssText = 'margin-top: 4px; font-size: 10px; color: #6a7a8a;'
     overviewHintDiv.textContent = subjectCode
       ? `Current subject: ${subjectCode}`
-      : 'Overview mode: Exam Rush scans all visible subject tables for saved targets.'
+      : 'Exam Rush scans visible subject tables for saved targets.'
     container.appendChild(overviewHintDiv)
   }
 

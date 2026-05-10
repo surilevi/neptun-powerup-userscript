@@ -1,5 +1,13 @@
 import type { NpuModule, ModuleApi, PageContext } from '../../types/modules'
-import { setApi, setIsDisposed, getDebounceTimer, setDebounceTimer, getTableObserver, setTableObserver, setCachedSubjectCode } from './state'
+import {
+  setApi,
+  setIsDisposed,
+  getDebounceTimer,
+  setDebounceTimer,
+  getTableObserver,
+  setTableObserver,
+  setCachedSubjectCode,
+} from './state'
 import { getSubjectCode, clearHighlights } from './dom'
 import { loadPreferences } from './storage'
 import { waitForExamTable, autoEnrollSaved } from './enroll'
@@ -9,7 +17,7 @@ import { delay } from '../../utils/async'
 export const examSignupModule: NpuModule = {
   id: 'exam-signup',
   name: 'Exam Quick Signup',
-  description: 'Save preferred exam dates and auto-enroll with one click',
+  description: 'Save exam dates and try enrolling them from the current page',
 
   shouldActivate(context: PageContext): boolean {
     return /\/exams\/overview\/registration\/?$/.test(context.path)
@@ -39,7 +47,7 @@ export const examSignupModule: NpuModule = {
     const rushOn = api.statusPanel.getExamRushMode()
     if (rushOn) {
       api.logger.info('Exam Rush Mode active - scanning visible exam tables for saved targets')
-      api.statusPanel.addMessage('info', 'Rush Mode: scanning visible exam tables...')
+      api.statusPanel.addMessage('info', 'Scanning visible exam tables...')
       await delay(1000)
       autoEnrollSaved().catch((err) => api.logger.error('rush exam auto-enroll failed:', err))
     }
@@ -50,7 +58,10 @@ export const examSignupModule: NpuModule = {
   dispose(): void {
     setIsDisposed(true)
     const timer = getDebounceTimer()
-    if (timer) { clearTimeout(timer); setDebounceTimer(null) }
+    if (timer) {
+      clearTimeout(timer)
+      setDebounceTimer(null)
+    }
     getTableObserver()?.disconnect()
     setTableObserver(null)
     clearHighlights()

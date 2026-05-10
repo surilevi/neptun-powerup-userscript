@@ -1,7 +1,7 @@
 {
   "name": "neptun-powerup",
   "version": "3.1.2",
-  "description": "Quality-of-life userscript for Neptun student portals",
+  "description": "Neptun helper userscript for course and exam workflows",
   "type": "module",
   "scripts": {
     "dev": "vite",

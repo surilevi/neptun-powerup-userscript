@@ -1,5 +1,12 @@
 import { getApi } from './state'
-import { findSubjectPanel, extractCourseCode, expandPanel, getCourseItems, isCourseSelected, toggleCourse } from './dom'
+import {
+  findSubjectPanel,
+  extractCourseCode,
+  expandPanel,
+  getCourseItems,
+  isCourseSelected,
+  toggleCourse,
+} from './dom'
 import { loadSelections } from './storage'
 
 /**
@@ -12,12 +19,15 @@ export async function loadStoredSelections(): Promise<void> {
 
   if (subjectCodes.length === 0) {
     api?.logger.info('no stored selections to load')
-    api?.statusPanel.addMessage('info', 'No stored selections found.')
+    api?.statusPanel.addMessage('info', 'No saved course selections found.')
     return
   }
 
-  api?.logger.info(`loading selections for ${subjectCodes.length} subject(s)`)
-  api?.statusPanel.addMessage('info', `Loading selections for ${subjectCodes.length} subject(s)...`)
+  api?.logger.info(`loading selections for ${subjectCodes.length} subjects`)
+  api?.statusPanel.addMessage(
+    'info',
+    `Loading ${subjectCodes.length} saved subject${subjectCodes.length === 1 ? '' : 's'}...`,
+  )
   api?.logger.info(
     `[load-debug] loadStoredSelections: preparing to match ${subjectCodes.length} stored subjects on the live page`,
   )
@@ -97,9 +107,9 @@ export async function loadStoredSelections(): Promise<void> {
     }
   }
 
-  api?.logger.info(`loaded selections for ${loadedCount} / ${subjectCodes.length} subject(s)`)
+  api?.logger.info(`loaded selections for ${loadedCount} / ${subjectCodes.length} subjects`)
   api?.statusPanel.addMessage(
     'info',
-    `Loaded ${loadedCount} / ${subjectCodes.length} subject(s). Review, then Quick Enroll or enroll manually.`,
+    `Loaded ${loadedCount}/${subjectCodes.length}. Review, then use Enroll Selected or enroll manually.`,
   )
 }

@@ -337,6 +337,30 @@ describe('infiniteSessionModule', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('should dismiss accented Hungarian session timeout dialogs', async () => {
+    const bus = createEventBus()
+    const api = createMockApi(bus)
+
+    await infiniteSessionModule.initialize(api)
+
+    const overlay = document.createElement('div')
+    overlay.className = 'cdk-overlay-container'
+    overlay.innerHTML = `
+      <div class="mat-mdc-dialog-container">
+        <p>A munkamenet hamarosan lejár. Kéri a meghosszabbítást?</p>
+        <button type="button">Meghosszabbít</button>
+      </div>
+    `
+    document.body.appendChild(overlay)
+
+    await Promise.resolve()
+
+    expect(api.statusPanel.addMessage).toHaveBeenCalledWith(
+      'info',
+      'Session timeout dialog dismissed',
+    )
+  })
+
   it('should stop watchdog on dispose', async () => {
     const bus = createEventBus()
     const api = createMockApi(bus)

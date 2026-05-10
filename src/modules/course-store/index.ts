@@ -8,7 +8,7 @@ import { renderModuleUI } from './ui'
 export const courseStoreModule: NpuModule = {
   id: 'course-store',
   name: 'Course Store',
-  description: 'Save and restore course selections for quick re-registration',
+  description: 'Save course selections and restore them later',
 
   shouldActivate(context: PageContext): boolean {
     return context.path.includes('/subjects/registration')
@@ -26,36 +26,38 @@ export const courseStoreModule: NpuModule = {
       const courseCount = Object.values(selections).reduce((sum, arr) => sum + arr.length, 0)
       api.statusPanel.addMessage(
         'info',
-        `${count} subject(s) with ${courseCount} course(s) stored. Click Load to restore.`,
+        `${count} saved subject${count === 1 ? '' : 's'}, ${courseCount} course${courseCount === 1 ? '' : 's'}. Use Load to restore.`,
       )
       api.logger.info(`found ${count} stored subject selection(s)`)
     }
 
-    setRouteUnsub(api.bus.on('page:changed', (payload) => {
-      if (payload.path.includes('/subjects/registration')) {
-        const currentApi = getApi()
-        if (!currentApi) return
-        renderModuleUI()
-          .then(async () => {
-            const freshApi = getApi()
-            if (!freshApi) return
-            const sel = await loadSelections()
-            const storedSubjects = Object.keys(sel).length
-            if (storedSubjects > 0) {
-              const storedCourses = Object.values(sel).reduce((sum, arr) => sum + arr.length, 0)
-              freshApi.statusPanel.addMessage(
-                'info',
-                `${storedSubjects} subject(s) with ${storedCourses} course(s) stored. Click Load to restore.`,
-              )
-            }
-          })
-          .catch((err) => {
-            const freshApi = getApi()
-            const log = freshApi?.logger ?? console
-            log.error('error in route change handler:', err)
-          })
-      }
-    }))
+    setRouteUnsub(
+      api.bus.on('page:changed', (payload) => {
+        if (payload.path.includes('/subjects/registration')) {
+          const currentApi = getApi()
+          if (!currentApi) return
+          renderModuleUI()
+            .then(async () => {
+              const freshApi = getApi()
+              if (!freshApi) return
+              const sel = await loadSelections()
+              const storedSubjects = Object.keys(sel).length
+              if (storedSubjects > 0) {
+                const storedCourses = Object.values(sel).reduce((sum, arr) => sum + arr.length, 0)
+                freshApi.statusPanel.addMessage(
+                  'info',
+                  `${storedSubjects} saved subject${storedSubjects === 1 ? '' : 's'}, ${storedCourses} course${storedCourses === 1 ? '' : 's'}. Use Load to restore.`,
+                )
+              }
+            })
+            .catch((err) => {
+              const freshApi = getApi()
+              const log = freshApi?.logger ?? console
+              log.error('error in route change handler:', err)
+            })
+        }
+      }),
+    )
 
     const autoSearchResult = await autoSearchSubjects()
 
@@ -64,9 +66,9 @@ export const courseStoreModule: NpuModule = {
       const rushSelections = await loadSelections()
       if (Object.keys(rushSelections).length > 0) {
         api.logger.info('Course Rush Mode active - auto-triggering Load & Enroll')
-        api.statusPanel.addMessage('info', 'Rush Mode: auto-enrolling saved courses...')
+        api.statusPanel.addMessage('info', 'Course Rush is enrolling saved courses...')
         api.statusPanel.setCourseRushMode(false)
-        api.statusPanel.addMessage('info', 'Course Rush triggered and turned off to avoid repeat runs.')
+        api.statusPanel.addMessage('info', 'Course Rush started and turned itself off.')
 
         let panelCount = getSubjectPanels().length
 
@@ -80,7 +82,9 @@ export const courseStoreModule: NpuModule = {
 
           if (panelCount === 0) {
             if (listingResult.state === 'request-failed' && listingResult.requestStatus !== null) {
-              api.logger.warn(`Rush Mode: subject search failed with status ${listingResult.requestStatus}`)
+              api.logger.warn(
+                `Rush Mode: subject search failed with status ${listingResult.requestStatus}`,
+              )
               api.statusPanel.addMessage(
                 'warn',
                 `Subject search failed (${listingResult.requestStatus}). Registration may not be open yet.`,
@@ -92,7 +96,9 @@ export const courseStoreModule: NpuModule = {
                 'Subject search completed, but no subjects were listed. Check filters or registration availability.',
               )
             } else {
-              api.logger.warn('Rush Mode: timed out waiting for subject listing - cannot auto-enroll')
+              api.logger.warn(
+                'Rush Mode: timed out waiting for subject listing - cannot auto-enroll',
+              )
               api.statusPanel.addMessage(
                 'warn',
                 'Timed out waiting for subjects to load. Try refreshing and enabling Rush Mode again.',
@@ -104,7 +110,10 @@ export const courseStoreModule: NpuModule = {
 
         if (panelCount === 0) {
           api.logger.warn('Rush Mode: no subjects are listed - cannot auto-enroll')
-          api.statusPanel.addMessage('warn', 'No subjects loaded. Try refreshing and enabling Rush Mode again.')
+          api.statusPanel.addMessage(
+            'warn',
+            'No subjects loaded. Try refreshing and enabling Rush Mode again.',
+          )
           return
         }
 

@@ -135,7 +135,7 @@ export function createStatusPanel(
   let settingsContainer: HTMLElement | null = null
   let normalContent: HTMLElement | null = null
   let gearBtn: HTMLElement | null = null
-  let titleSpanRef: HTMLElement | null = null  // promoted from local in build() so toggleSettings() can access it
+  let titleSpanRef: HTMLElement | null = null // promoted from local in build() so toggleSettings() can access it
 
   // --- Theme state ---
   let themeSettings: ThemeSettings = themeInitial ? { ...themeInitial } : { ...DEFAULT_THEME }
@@ -379,7 +379,7 @@ export function createStatusPanel(
     // Course Rush toggle
     const courseLabel = document.createElement('label')
     courseLabel.className = 'npu-rush-toggle'
-    courseLabel.title = 'When ON: after login, auto-redirects to registration page and enrolls saved courses'
+    courseLabel.title = 'After login, open course registration and enroll saved courses'
     courseRushToggle = document.createElement('input')
     courseRushToggle.type = 'checkbox'
     courseRushToggle.checked = courseRushOn
@@ -400,7 +400,7 @@ export function createStatusPanel(
     // Exam Rush toggle
     const examLabel = document.createElement('label')
     examLabel.className = 'npu-rush-toggle'
-    examLabel.title = 'When ON: after login, auto-redirects to exam page and enrolls saved exam dates'
+    examLabel.title = 'After login, open exams and enroll saved dates'
     examRushToggle = document.createElement('input')
     examRushToggle.type = 'checkbox'
     examRushToggle.checked = examRushOn
@@ -459,7 +459,7 @@ export function createStatusPanel(
     try {
       document.body.appendChild(root)
     } catch {
-      // body not ready — defer
+      // Body is not ready yet; attach the panel after DOMContentLoaded.
       document.addEventListener('DOMContentLoaded', () => {
         if (root && !root.parentNode) {
           document.body.appendChild(root)
@@ -542,19 +542,19 @@ export function createStatusPanel(
     // Legal section
     const legalHeader = document.createElement('div')
     legalHeader.style.cssText = `color: ${COLORS.accent}; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 16px; margin-bottom: 10px; padding-top: 12px; border-top: 1px solid ${COLORS.border};`
-    legalHeader.textContent = 'Legal'
+    legalHeader.textContent = 'Consent'
     container.appendChild(legalHeader)
 
     const resetBtn = document.createElement('button')
     resetBtn.style.cssText = `padding: 5px 12px; background: transparent; color: ${COLORS.red}; border: 1px solid ${COLORS.red}; border-radius: 4px; cursor: pointer; font-size: 11px;`
-    resetBtn.textContent = 'Reset Consent'
+    resetBtn.textContent = 'Show Consent Again'
     resetBtn.addEventListener('click', async () => {
       rushCallbacks?.onConsentReset?.()
-      resetBtn.textContent = 'Consent reset!'
+      resetBtn.textContent = 'Consent will show again'
       resetBtn.style.color = COLORS.green
       resetBtn.style.borderColor = COLORS.green
       setTimeout(() => {
-        resetBtn.textContent = 'Reset Consent'
+        resetBtn.textContent = 'Show Consent Again'
         resetBtn.style.color = COLORS.red
         resetBtn.style.borderColor = COLORS.red
       }, 2000)
@@ -563,7 +563,7 @@ export function createStatusPanel(
 
     const resetNote = document.createElement('div')
     resetNote.style.cssText = `font-size: 10px; color: #666; margin-top: 4px;`
-    resetNote.textContent = 'Shows the consent dialog again on next load'
+    resetNote.textContent = 'The consent prompt appears on the next page load'
     container.appendChild(resetNote)
   }
 
@@ -577,7 +577,8 @@ export function createStatusPanel(
     settingsVisible = !settingsVisible
     if (normalContent) normalContent.style.display = settingsVisible ? 'none' : 'block'
     if (settingsContainer) settingsContainer.style.display = settingsVisible ? 'block' : 'none'
-    if (titleSpanRef) titleSpanRef.textContent = settingsVisible ? '\u2699 Settings' : 'Neptun PowerUp!'
+    if (titleSpanRef)
+      titleSpanRef.textContent = settingsVisible ? '\u2699 Settings' : 'Neptun PowerUp!'
   }
 
   // --- Render helpers ---
@@ -614,9 +615,10 @@ export function createStatusPanel(
 
     switch (sessionState) {
       case 'active':
-        sessionLine.textContent = sessionRemainingMs > 0
-          ? `Session: ${formatCountdown(sessionRemainingMs)}`
-          : 'Session: active'
+        sessionLine.textContent =
+          sessionRemainingMs > 0
+            ? `Session: ${formatCountdown(sessionRemainingMs)}`
+            : 'Session: active'
         sessionLine.style.color = COLORS.text
         break
       case 'expiring':
@@ -628,7 +630,7 @@ export function createStatusPanel(
         sessionLine.style.color = COLORS.red
         break
       case 'refreshing':
-        sessionLine.textContent = 'Session: Refreshing...'
+        sessionLine.textContent = 'Session: refreshing...'
         sessionLine.style.color = COLORS.yellow
         break
     }
@@ -935,7 +937,9 @@ export function createStatusPanel(
     getExamRushMode,
     setExamRushMode: setExamRushModeValue,
     getThemeSettings: () => ({ ...themeSettings }),
-    setThemeSettings: (settings: ThemeSettings) => { themeSettings = { ...settings } },
+    setThemeSettings: (settings: ThemeSettings) => {
+      themeSettings = { ...settings }
+    },
     onThemeSettingsChange: (cb: (settings: ThemeSettings) => void) => {
       themeChangeCallbacks.push(cb)
       return () => {

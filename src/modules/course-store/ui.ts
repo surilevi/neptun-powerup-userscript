@@ -25,7 +25,8 @@ export async function renderModuleUI(): Promise<void> {
 
   if (debugEnabled) {
     const buildDiv = document.createElement('div')
-    buildDiv.style.cssText = 'margin-top: -4px; margin-bottom: 6px; font-size: 10px; color: #6a7a8a;'
+    buildDiv.style.cssText =
+      'margin-top: -4px; margin-bottom: 6px; font-size: 10px; color: #6a7a8a;'
     buildDiv.textContent = `Build: ${COURSE_UI_BUILD}`
     container.appendChild(buildDiv)
   }
@@ -51,9 +52,9 @@ export async function renderModuleUI(): Promise<void> {
   // Save button (always present)
   const saveBtn = document.createElement('button')
   saveBtn.style.cssText = `${btnStyle} background: #1565c0; color: white;`
-  saveBtn.textContent = 'Save selections'
+  saveBtn.textContent = 'Save'
   saveBtn.addEventListener('click', () => {
-    saveCurrentSelections().catch(err => api?.logger.error('save selections failed:', err))
+    saveCurrentSelections().catch((err) => api?.logger.error('save selections failed:', err))
   })
   btnContainer.appendChild(saveBtn)
 
@@ -64,7 +65,7 @@ export async function renderModuleUI(): Promise<void> {
     // Saved details — toggle view
     const toggleBtn = document.createElement('button')
     toggleBtn.style.cssText = `${btnStyle} background: #37474f; color: white; margin-bottom: 4px;`
-    toggleBtn.textContent = `View saved (${count} subj, ${courseCount} courses)`
+    toggleBtn.textContent = `Saved (${count} subjects, ${courseCount} courses)`
 
     const detailDiv = document.createElement('div')
     detailDiv.style.cssText =
@@ -72,14 +73,16 @@ export async function renderModuleUI(): Promise<void> {
 
     for (const [subj, courses] of Object.entries(selections)) {
       const row = document.createElement('div')
-      row.style.cssText = 'padding: 2px 0; border-bottom: 1px solid #1a2a4a; display: flex; justify-content: space-between; align-items: center;'
+      row.style.cssText =
+        'padding: 2px 0; border-bottom: 1px solid #1a2a4a; display: flex; justify-content: space-between; align-items: center;'
 
       const text = document.createElement('span')
       text.textContent = `${subj}: ${courses.join(', ')}`
       row.appendChild(text)
 
       const removeBtn = document.createElement('button')
-      removeBtn.style.cssText = 'margin-left: 6px; padding: 1px 6px; background: #c62828; color: white; border: none; border-radius: 2px; cursor: pointer; font-size: 10px; flex-shrink: 0;'
+      removeBtn.style.cssText =
+        'margin-left: 6px; padding: 1px 6px; background: #c62828; color: white; border: none; border-radius: 2px; cursor: pointer; font-size: 10px; flex-shrink: 0;'
       removeBtn.textContent = 'x'
       removeBtn.title = `Remove saved courses for ${subj}`
       removeBtn.addEventListener('click', () => {
@@ -96,7 +99,7 @@ export async function renderModuleUI(): Promise<void> {
       const isVisible = detailDiv.style.display !== 'none'
       detailDiv.style.display = isVisible ? 'none' : 'block'
       toggleBtn.textContent = isVisible
-        ? `View saved (${count} subj, ${courseCount} courses)`
+        ? `Saved (${count} subjects, ${courseCount} courses)`
         : 'Hide saved'
     })
 
@@ -106,40 +109,40 @@ export async function renderModuleUI(): Promise<void> {
     // Load button
     const loadBtn = document.createElement('button')
     loadBtn.style.cssText = `${btnStyle} background: #2e7d32; color: white;`
-    loadBtn.textContent = 'Load selections'
+    loadBtn.textContent = 'Load'
     loadBtn.addEventListener('click', () => {
-      loadStoredSelections().catch(err => api?.logger.error('load selections failed:', err))
+      loadStoredSelections().catch((err) => api?.logger.error('load selections failed:', err))
     })
     btnContainer.appendChild(loadBtn)
 
     // Load & Enroll combo button — the registration rush button
     const loadEnrollBtn = document.createElement('button')
     loadEnrollBtn.style.cssText = `${btnStyle} background: #d84315; color: white; font-weight: bold;`
-    loadEnrollBtn.textContent = 'Load & Enroll'
-    loadEnrollBtn.title = 'One click: load saved courses + enroll all subjects'
+    loadEnrollBtn.textContent = 'Load + Enroll'
+    loadEnrollBtn.title = 'Load saved courses, then enroll each subject'
     loadEnrollBtn.addEventListener('click', () => {
       if (getIsEnrolling()) return
-      loadAndEnroll().catch(err => api?.logger.error('load & enroll failed:', err))
+      loadAndEnroll().catch((err) => api?.logger.error('load & enroll failed:', err))
     })
     btnContainer.appendChild(loadEnrollBtn)
 
     // Quick Enroll button (enroll already-selected courses without loading)
     const enrollBtn = document.createElement('button')
     enrollBtn.style.cssText = `${btnStyle} background: #e65100; color: white;`
-    enrollBtn.textContent = 'Quick Enroll'
-    enrollBtn.title = 'Enroll subjects that already have courses selected'
+    enrollBtn.textContent = 'Enroll Selected'
+    enrollBtn.title = 'Enroll subjects with courses already selected'
     enrollBtn.addEventListener('click', () => {
       if (getIsEnrolling()) return
-      quickEnrollAll().catch(err => api?.logger.error('quick enroll failed:', err))
+      quickEnrollAll().catch((err) => api?.logger.error('quick enroll failed:', err))
     })
     btnContainer.appendChild(enrollBtn)
 
     // Clear button
     const clearBtn = document.createElement('button')
     clearBtn.style.cssText = `${btnStyle} background: #c62828; color: white;`
-    clearBtn.textContent = 'Clear'
+    clearBtn.textContent = 'Clear Saved'
     clearBtn.addEventListener('click', () => {
-      handleClear().catch(err => api?.logger.error('clear selections failed:', err))
+      handleClear().catch((err) => api?.logger.error('clear selections failed:', err))
     })
     btnContainer.appendChild(clearBtn)
   }
@@ -148,7 +151,7 @@ export async function renderModuleUI(): Promise<void> {
 
   const hint = document.createElement('div')
   hint.style.cssText = 'margin-top: 6px; font-size: 10px; color: #6a7a8a;'
-  hint.textContent = 'Expand subjects & select courses before saving.'
+  hint.textContent = 'Expand subjects and select courses before saving.'
   container.appendChild(hint)
 
   if (debugEnabled) {
@@ -159,7 +162,7 @@ export async function renderModuleUI(): Promise<void> {
 
     const rushHintDiv = document.createElement('div')
     rushHintDiv.style.cssText = 'margin-top: 4px; font-size: 10px; color: #6a7a8a;'
-    rushHintDiv.textContent = 'Course Rush should auto-turn off after a run starts.'
+    rushHintDiv.textContent = 'Course Rush turns off after a run starts.'
     container.appendChild(rushHintDiv)
   }
 

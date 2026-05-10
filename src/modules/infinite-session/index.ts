@@ -29,6 +29,13 @@ let unsubscribe: (() => void) | null = null
 let visibilityHandler: (() => void) | null = null
 let sessionModalObserver: MutationObserver | null = null
 
+function normalizeMatchText(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
 function getExistingTokenPayload(): TokenAcquiredPayload | null {
   try {
     const accessToken = sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken)
@@ -40,9 +47,7 @@ function getExistingTokenPayload(): TokenAcquiredPayload | null {
     const expiresAt = jwt.exp * 1000
     if (!Number.isFinite(expiresAt)) return null
 
-    const refreshExpiration = sessionStorage.getItem(
-      SESSION_STORAGE_KEYS.refreshTokenExpiration,
-    )
+    const refreshExpiration = sessionStorage.getItem(SESSION_STORAGE_KEYS.refreshTokenExpiration)
 
     let refreshExpiresAt = 0
     if (refreshExpiration) {
@@ -80,18 +85,14 @@ function persistRefreshedTokens(bodyText: string): boolean {
     }
 
     const accessToken = data.access_token ?? data.accessToken
-    const refreshTokenExpiration =
-      data.refresh_token_expiration ?? data.refreshTokenExpiration
+    const refreshTokenExpiration = data.refresh_token_expiration ?? data.refreshTokenExpiration
 
     if (!accessToken) return false
 
     sessionStorage.setItem(SESSION_STORAGE_KEYS.accessToken, accessToken)
 
     if (refreshTokenExpiration) {
-      sessionStorage.setItem(
-        SESSION_STORAGE_KEYS.refreshTokenExpiration,
-        refreshTokenExpiration,
-      )
+      sessionStorage.setItem(SESSION_STORAGE_KEYS.refreshTokenExpiration, refreshTokenExpiration)
     }
 
     const jwt = decodeJwt(accessToken)
@@ -214,7 +215,9 @@ function triggerKeepAlive(): void {
             api?.bus.emit('token:expired', {})
           }
         } else {
-          api?.logger.warn(`[session-debug] refresh request returned unexpected status ${response.status}`)
+          api?.logger.warn(
+            `[session-debug] refresh request returned unexpected status ${response.status}`,
+          )
           api?.logger.warn(`session refresh returned unexpected status: ${response.status}`)
         }
       } finally {
@@ -247,7 +250,9 @@ function triggerKeepAlive(): void {
             triggerKeepAlive()
           }, 10_000)
         } else {
-          api.logger.info(`token has only ${Math.round(remaining / 1000)}s left, watchdog will handle`)
+          api.logger.info(
+            `token has only ${Math.round(remaining / 1000)}s left, watchdog will handle`,
+          )
         }
       }
     })
@@ -299,7 +304,9 @@ function onVisibilityChange(): void {
     )
 
     if (remaining <= REFRESH_BUFFER_MS) {
-      api.logger.info('[session-debug] onVisibilityChange: token near expiry, triggering keep-alive immediately')
+      api.logger.info(
+        '[session-debug] onVisibilityChange: token near expiry, triggering keep-alive immediately',
+      )
       triggerKeepAlive()
     }
   } catch (err) {
@@ -316,53 +323,11 @@ function suppressSessionTimeoutModals(): void {
     )
 
     for (const btn of Array.from(overlayButtons)) {
-      const text = (btn.textContent ?? '').trim().toLowerCase()
-      const dialogText =
-        btn.closest('.cdk-overlay-pane, .mat-mdc-dialog-container')?.textContent?.toLowerCase() ??
-        ''
-
-      const isSessionDialog =
-        (dialogText.includes('session') || dialogText.includes('munkamenet')) &&
-        (dialogText.includes('lejĂˇr') ||
-          dialogText.includes('expir') ||
-          dialogText.includes('timeout') ||
-          dialogText.includes('idĹ‘tĂşllĂ©pĂ©s') ||
-          dialogText.includes('kijelentkezĂ©s') ||
-          /\d+\s*(perc|sec|mp|mĂˇsodperc)/.test(dialogText))
-
-      const isExtendButton =
-        text === 'ok' ||
-        text === 'igen' ||
-        text.includes('extend') ||
-        text.includes('meghosszabbĂ­t') ||
-        text.includes('folytat') ||
-        text.includes('marad')
-
-      if (isSessionDialog && isExtendButton) {
-        api?.logger.info(`[session-debug] suppressing session timeout modal, clicking: ${text}`)
-        api?.statusPanel.addMessage('info', 'Session timeout dialog auto-dismissed')
-        ;(btn as HTMLElement).click()
-        return
-      }
-    }
-  })
-
-  sessionModalObserver.observe(document.body, { childList: true, subtree: true })
-}
-
-function suppressSessionTimeoutModalsV2(): void {
-  sessionModalObserver?.disconnect()
-
-  sessionModalObserver = new MutationObserver(() => {
-    const overlayButtons = document.querySelectorAll(
-      '.cdk-overlay-container button, .mat-mdc-dialog-container button',
-    )
-
-    for (const btn of Array.from(overlayButtons)) {
-      const text = (btn.textContent ?? '').trim().toLowerCase()
-      const dialogText =
-        btn.closest('.cdk-overlay-pane, .mat-mdc-dialog-container')?.textContent?.toLowerCase() ??
-        ''
+      const rawText = (btn.textContent ?? '').trim()
+      const text = normalizeMatchText(rawText)
+      const dialogText = normalizeMatchText(
+        btn.closest('.cdk-overlay-pane, .mat-mdc-dialog-container')?.textContent ?? '',
+      )
 
       const isSessionDialog =
         (dialogText.includes('session') || dialogText.includes('munkamenet')) &&
@@ -382,8 +347,8 @@ function suppressSessionTimeoutModalsV2(): void {
         text.includes('marad')
 
       if (isSessionDialog && isExtendButton) {
-        api?.logger.info(`[session-debug] suppressing session timeout modal, clicking: ${text}`)
-        api?.statusPanel.addMessage('info', 'Session timeout dialog auto-dismissed')
+        api?.logger.info(`[session-debug] suppressing session timeout modal, clicking: ${rawText}`)
+        api?.statusPanel.addMessage('info', 'Session timeout dialog dismissed')
         ;(btn as HTMLElement).click()
         return
       }
@@ -396,7 +361,7 @@ function suppressSessionTimeoutModalsV2(): void {
 export const infiniteSessionModule: NpuModule = {
   id: 'infinite-session',
   name: 'Infinite Session',
-  description: 'Keeps your Neptun session alive by triggering token refresh before JWT expires',
+  description: 'Keeps the current Neptun session alive when possible',
 
   shouldActivate(_context: PageContext): boolean {
     return true
@@ -410,7 +375,6 @@ export const infiniteSessionModule: NpuModule = {
     document.addEventListener('visibilitychange', visibilityHandler)
 
     suppressSessionTimeoutModals()
-    suppressSessionTimeoutModalsV2()
     hydrateFromSessionStorage()
 
     api.logger.info('initialized, waiting for token from sessionStorage watcher')

@@ -18,7 +18,7 @@ export async function storeConsent(storage: StorageService): Promise<void> {
 }
 
 /**
- * Reset consent (for settings "Reset Consent" button).
+ * Reset consent from the settings panel.
  */
 export async function resetConsent(storage: StorageService): Promise<void> {
   await storage.setForDomain(CONSENT_KEY, false)
@@ -71,21 +71,20 @@ export function showConsentDialog(version: string): Promise<boolean> {
 
     dialog.appendChild(titleSection)
 
-    // --- Acknowledgement paragraph ---
     const ackParagraph = document.createElement('div')
     ackParagraph.style.cssText = 'font-size: 13px; color: #bbb; margin-bottom: 14px;'
-    ackParagraph.textContent = 'By using this tool, you acknowledge that it:'
+    ackParagraph.textContent = 'Before using NPU, please confirm that you understand what it does:'
     dialog.appendChild(ackParagraph)
 
-    // --- Bullet points ---
     const bulletList = document.createElement('ul')
-    bulletList.style.cssText = 'font-size: 12px; color: #ccc; line-height: 1.8; padding-left: 18px; margin: 0 0 16px 0;'
+    bulletList.style.cssText =
+      'font-size: 12px; color: #ccc; line-height: 1.8; padding-left: 18px; margin: 0 0 16px 0;'
 
     const bullets: Array<{ bold: string; rest: string }> = [
-      { bold: 'Maintains your session', rest: ' by refreshing the active Neptun session before it expires' },
-      { bold: 'Automates course enrollment', rest: ' by clicking buttons and filling forms on your behalf' },
-      { bold: 'Automates exam signup', rest: ' by enrolling for saved exam dates on your behalf' },
-      { bold: 'May violate', rest: " your university's acceptable use policy" },
+      { bold: 'Keeps the session alive', rest: ' by refreshing active Neptun tokens' },
+      { bold: 'Clicks course controls', rest: ' when you ask it to enroll saved selections' },
+      { bold: 'Clicks exam controls', rest: ' when you ask it to enroll saved exam dates' },
+      { bold: 'May conflict with rules', rest: ' at your university or faculty' },
     ]
 
     for (const bullet of bullets) {
@@ -100,32 +99,33 @@ export function showConsentDialog(version: string): Promise<boolean> {
 
     dialog.appendChild(bulletList)
 
-    // --- Liability notice ---
     const liabilityBox = document.createElement('div')
-    liabilityBox.style.cssText = 'font-size: 11px; color: #9e9e9e; margin-bottom: 18px; padding: 8px 10px; background: #1a1a2e; border-radius: 6px; border-left: 3px solid #ff9800;'
-    liabilityBox.textContent = "You are solely responsible for compliance with your university's policies. The authors accept no liability."
+    liabilityBox.style.cssText =
+      'font-size: 11px; color: #9e9e9e; margin-bottom: 18px; padding: 8px 10px; background: #1a1a2e; border-radius: 6px; border-left: 3px solid #ff9800;'
+    liabilityBox.textContent =
+      'Use it only if it is allowed for your account. You are responsible for the result.'
     dialog.appendChild(liabilityBox)
 
-    // --- Buttons ---
     const btnContainer = document.createElement('div')
     btnContainer.style.cssText = 'display: flex; gap: 10px; justify-content: center;'
 
     const acceptBtn = document.createElement('button')
-    acceptBtn.style.cssText = 'padding: 8px 28px; background: #5c9eff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;'
-    acceptBtn.textContent = 'I Accept'
+    acceptBtn.style.cssText =
+      'padding: 8px 28px; background: #5c9eff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;'
+    acceptBtn.textContent = 'Accept'
 
     const declineBtn = document.createElement('button')
-    declineBtn.style.cssText = 'padding: 8px 28px; background: transparent; color: #9e9e9e; border: 1px solid #2a2a4a; border-radius: 6px; cursor: pointer; font-size: 13px;'
+    declineBtn.style.cssText =
+      'padding: 8px 28px; background: transparent; color: #9e9e9e; border: 1px solid #2a2a4a; border-radius: 6px; cursor: pointer; font-size: 13px;'
     declineBtn.textContent = 'Decline'
 
     btnContainer.appendChild(acceptBtn)
     btnContainer.appendChild(declineBtn)
     dialog.appendChild(btnContainer)
 
-    // --- Footer note ---
     const footerNote = document.createElement('div')
     footerNote.style.cssText = 'text-align: center; margin-top: 12px; font-size: 10px; color: #666;'
-    footerNote.textContent = 'This prompt only appears once. You can reset it in Settings.'
+    footerNote.textContent = 'You can show this prompt again from Settings.'
     dialog.appendChild(footerNote)
 
     overlay.appendChild(dialog)
