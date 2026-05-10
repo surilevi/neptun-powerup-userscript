@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output (keep npu.user.js for direct install)
+dist/*.js.map
+dist/*.css
+
+# Vite
+.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Environment
+.env
+.env.local
+
+# Debug
+npm-debug.log*
+pnpm-debug.log*
+
+# Test coverage
+coverage/
+
+# Claude Code
+.claude/
+docs/superpowers/
+
+# Archived upstream clone/reference
+npu/
+
+# Personal notes
+note_for_me*.txt
