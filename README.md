@@ -2,6 +2,8 @@
 
 Tampermonkey userscript with quality-of-life helpers for Neptun student portals.
 
+Hungarian documentation: [README.hu.md](README.hu.md)
+
 Neptun PowerUp! focuses on reducing repetitive work inside authenticated Neptun pages: saving course selections, restoring them during registration periods, keeping the active session alive, and quickly rejoining saved exam dates.
 
 > Important: This tool automates parts of the Neptun UI. Use it at your own risk and in line with your university's acceptable-use policy.
@@ -12,6 +14,10 @@ Neptun PowerUp! focuses on reducing repetitive work inside authenticated Neptun 
 2. Build the userscript with `pnpm build`.
 3. Open [`dist/npu.user.js`](dist/npu.user.js) and install it in Tampermonkey.
 4. Open your university's Neptun portal. The NPU panel appears in the bottom-right corner.
+
+If you want to install directly from GitHub, use:
+
+- [dist/npu.user.js](https://github.com/surilevi/neptun-powerup-userscript/raw/main/dist/npu.user.js)
 
 ## Features
 
