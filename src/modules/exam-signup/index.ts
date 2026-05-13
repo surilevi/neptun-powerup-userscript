@@ -7,6 +7,7 @@ import {
   getTableObserver,
   setTableObserver,
   setCachedSubjectCode,
+  setIsEnrollmentInProgress,
 } from './state'
 import { getSubjectCode, clearHighlights } from './dom'
 import { loadPreferences } from './storage'
@@ -26,6 +27,7 @@ export const examSignupModule: NpuModule = {
   async initialize(moduleApi: ModuleApi): Promise<void> {
     setApi(moduleApi)
     setIsDisposed(false)
+    setIsEnrollmentInProgress(false)
     const api = moduleApi
 
     const tableReady = await waitForExamTable(5000)
@@ -57,6 +59,7 @@ export const examSignupModule: NpuModule = {
 
   dispose(): void {
     setIsDisposed(true)
+    setIsEnrollmentInProgress(false)
     const timer = getDebounceTimer()
     if (timer) {
       clearTimeout(timer)

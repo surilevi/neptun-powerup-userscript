@@ -1,14 +1,25 @@
 import { delay } from '../../utils/async'
-import { getApi, getIsDisposed } from './state'
-import { getExamRows, getRowSubjectCode, getSubjectCode, parseExamRow } from './dom'
+import {
+  getApi,
+  getIsDisposed,
+  getIsEnrollmentInProgress,
+  setIsEnrollmentInProgress,
+} from './state'
+import {
+  buildTableSubjectCodeMap,
+  getExamRows,
+  getRowSubjectCode,
+  getSubjectCode,
+  parseExamRow,
+} from './dom'
 import { loadPreferences } from './storage'
 import type { ExamPreferences, ExamRowInfo } from './state'
 import { waitForRequestComplete } from '../../utils/xhr'
+import { SESSION_STORAGE_KEYS } from '../../types/neptun-api'
 
 interface SavedExamTarget {
   subjectCode: string
   pref: ExamPreferences[string]
-  info: ExamRowInfo
 }
 
 interface EnrollmentAttemptResult {
@@ -17,13 +28,18 @@ interface EnrollmentAttemptResult {
   shouldStop: boolean
 }
 
+const CONFIRM_BUTTON_WAIT_MS = 1500
+const CONFIRM_BUTTON_POLL_MS = 50
+
 function isCurrentEnrollmentRun(apiRef: ReturnType<typeof getApi>): boolean {
   return !getIsDisposed() && getApi() === apiRef
 }
 
 function resolveCurrentTargetInfo(target: SavedExamTarget): ExamRowInfo | null {
+  const tableSubjectCodes = buildTableSubjectCodeMap()
+
   for (const row of getExamRows()) {
-    const subjectCode = getRowSubjectCode(row)
+    const subjectCode = getRowSubjectCode(row, tableSubjectCodes)
     if (subjectCode !== target.subjectCode) continue
 
     const info = parseExamRow(row)
@@ -50,21 +66,128 @@ function getLatestNotificationSummary(): string | null {
 
 function findSavedExamTargets(prefs: ExamPreferences): SavedExamTarget[] {
   const targets: SavedExamTarget[] = []
+  const tableSubjectCodes = buildTableSubjectCodeMap()
 
   for (const row of getExamRows()) {
-    const subjectCode = getRowSubjectCode(row)
+    const subjectCode = getRowSubjectCode(row, tableSubjectCodes)
     if (!subjectCode) continue
 
     const pref = prefs[subjectCode]
     if (!pref) continue
 
-    const info = parseExamRow(row)
-    if (info.date !== pref.date) continue
+    if (parseExamRow(row).date !== pref.date) continue
 
-    targets.push({ subjectCode, pref, info })
+    targets.push({ subjectCode, pref })
   }
 
   return targets
+}
+
+function hasSessionToken(): boolean {
+  const api = getApi()
+
+  try {
+    const token = sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken)
+    if (!token) {
+      api?.logger.warn('no access_token in sessionStorage - session may have expired')
+      api?.statusPanel.addMessage('error', 'Session expired. Log in again before enrolling.')
+      return false
+    }
+  } catch (err) {
+    api?.logger.warn('cannot check sessionStorage for access_token:', err)
+  }
+
+  return true
+}
+
+function normalizeButtonText(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function isConfirmButtonText(text: string): boolean {
+  const normalized = normalizeButtonText(text)
+  return (
+    normalized.includes('megerosit') ||
+    normalized.includes('confirm') ||
+    normalized === 'igen' ||
+    normalized === 'ok'
+  )
+}
+
+function isButtonInteractable(button: HTMLElement): boolean {
+  if (!button.isConnected) return false
+  if (button.hasAttribute('disabled')) return false
+
+  const htmlButton = button as HTMLButtonElement
+  if (typeof htmlButton.disabled === 'boolean' && htmlButton.disabled) return false
+
+  const ariaDisabled = button.getAttribute('aria-disabled')
+  if (ariaDisabled === 'true') return false
+
+  const style = window.getComputedStyle(button)
+  return style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none'
+}
+
+function findConfirmButtonElement(): HTMLElement | null {
+  const overlay = document.querySelector('.cdk-overlay-container')
+  if (!overlay) return null
+
+  const buttons = Array.from(overlay.querySelectorAll('button'))
+  const btn = buttons.find(
+    (button) => isConfirmButtonText(button.textContent ?? '') && isButtonInteractable(button),
+  )
+  return (btn as HTMLElement) ?? null
+}
+
+export function waitForConfirmButton(
+  timeoutMs: number = CONFIRM_BUTTON_WAIT_MS,
+  stopWhen?: Promise<unknown>,
+): Promise<HTMLElement | null> {
+  return new Promise((resolve) => {
+    let settled = false
+    let observer: MutationObserver | null = null
+    let pollTimer: ReturnType<typeof setInterval> | null = null
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null
+
+    function cleanup(): void {
+      observer?.disconnect()
+      if (pollTimer) clearInterval(pollTimer)
+      if (timeoutTimer) clearTimeout(timeoutTimer)
+    }
+
+    function settle(button: HTMLElement | null): void {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(button)
+    }
+
+    function check(): void {
+      const button = findConfirmButtonElement()
+      if (button) settle(button)
+    }
+
+    check()
+    if (settled) return
+
+    const observerTarget = document.body ?? document.documentElement
+    if (observerTarget) {
+      observer = new MutationObserver(check)
+      observer.observe(observerTarget, { attributes: true, childList: true, subtree: true })
+    }
+
+    pollTimer = setInterval(check, CONFIRM_BUTTON_POLL_MS)
+    timeoutTimer = setTimeout(() => settle(null), timeoutMs)
+    stopWhen?.then(
+      () => settle(null),
+      () => settle(null),
+    )
+  })
 }
 
 async function submitEnrollmentTarget(target: SavedExamTarget): Promise<EnrollmentAttemptResult> {
@@ -134,26 +257,17 @@ async function submitEnrollmentTarget(target: SavedExamTarget): Promise<Enrollme
   )
 
   info.felvetelBtn.click()
-  await delay(500)
 
   if (isCurrentEnrollmentRun(api)) {
-    const confirmBtn = findConfirmButton()
+    const confirmBtn = await waitForConfirmButton(CONFIRM_BUTTON_WAIT_MS, requestPromise)
     if (confirmBtn) {
       api?.logger.info('[exam-enroll-debug] dialog found, confirming')
       confirmBtn.click()
-
-      const closeStart = Date.now()
-      while (Date.now() - closeStart < 2000 && isCurrentEnrollmentRun(api)) {
-        if (!findConfirmButton()) break
-        await delay(100)
-      }
     } else {
-      api?.logger.info('[exam-enroll-debug] no dialog - enrollment submitted directly')
+      api?.logger.info(
+        '[exam-enroll-debug] no dialog - enrollment submitted directly or confirmation did not appear',
+      )
     }
-  }
-
-  if (isCurrentEnrollmentRun(api)) {
-    await delay(500)
   }
 
   if (!isCurrentEnrollmentRun(api)) {
@@ -197,92 +311,105 @@ async function submitEnrollmentTarget(target: SavedExamTarget): Promise<Enrollme
 
 export async function autoEnrollSaved(): Promise<void> {
   const api = getApi()
-  const prefs = await loadPreferences()
-
-  if (Object.keys(prefs).length === 0) {
-    api?.logger.info('[exam-enroll-debug] autoEnrollSaved: no saved preferences found')
-    api?.statusPanel.addMessage('info', 'No saved exam dates found.')
+  if (getIsEnrollmentInProgress()) {
+    api?.logger.warn('[exam-enroll-debug] autoEnrollSaved: enrollment already in progress')
     return
   }
 
-  const pageSubjectCode = getSubjectCode()
-  const targets = findSavedExamTargets(prefs)
-  api?.logger.info(
-    `[exam-enroll-debug] autoEnrollSaved: found ${targets.length} saved targets on the current page`,
-  )
+  if (!hasSessionToken()) return
 
-  if (targets.length === 0) {
-    if (pageSubjectCode && prefs[pageSubjectCode]) {
-      api?.logger.warn(
-        `[exam-enroll-debug] autoEnrollSaved: saved exam date "${prefs[pageSubjectCode].date}" not found on current page`,
-      )
-      api?.statusPanel.addMessage(
-        'warn',
-        `Saved exam date "${prefs[pageSubjectCode].date}" not found on this page.`,
-      )
-    } else {
-      api?.logger.info(
-        '[exam-enroll-debug] autoEnrollSaved: no saved exam targets visible on this page',
-      )
-      api?.statusPanel.addMessage('info', 'No saved exam dates are visible on this page.')
-    }
-    showRetryButton()
-    return
-  }
+  setIsEnrollmentInProgress(true)
 
-  api?.statusPanel.addMessage(
-    'info',
-    `Exam Rush: ${targets.length} saved target${targets.length === 1 ? '' : 's'} visible.`,
-  )
-  api?.statusPanel.setExamRushMode(false)
-  api?.statusPanel.addMessage('info', 'Exam Rush started and turned itself off.')
+  try {
+    const prefs = await loadPreferences()
 
-  let failedCount = 0
-  let submittedCount = 0
-  let stoppedEarly = false
-  for (const target of targets) {
-    if (!isCurrentEnrollmentRun(api)) {
-      break
+    if (Object.keys(prefs).length === 0) {
+      api?.logger.info('[exam-enroll-debug] autoEnrollSaved: no saved preferences found')
+      api?.statusPanel.addMessage('info', 'No saved exam dates found.')
+      return
     }
 
-    const result = await submitEnrollmentTarget(target)
-    if (result.submitted) {
-      submittedCount++
-      await delay(250)
-    }
-    if (result.failed) {
-      failedCount++
-      await delay(250)
-    }
-
-    if (result.shouldStop) {
-      stoppedEarly = true
-      break
-    }
-  }
-
-  if (!isCurrentEnrollmentRun(api)) {
-    return
-  }
-
-  if (submittedCount === 0 && failedCount === 0) {
-    api?.statusPanel.addMessage('warn', 'Exam Rush did not submit any visible saved exams.')
-    showRetryButton()
-  } else if (stoppedEarly) {
-    api?.statusPanel.addMessage(
-      'warn',
-      `Exam Rush stopped early: ${submittedCount} submitted, ${failedCount} failed.`,
+    const pageSubjectCode = getSubjectCode()
+    const targets = findSavedExamTargets(prefs)
+    api?.logger.info(
+      `[exam-enroll-debug] autoEnrollSaved: found ${targets.length} saved targets on the current page`,
     )
-  } else if (failedCount > 0) {
-    api?.statusPanel.addMessage(
-      'warn',
-      `Exam Rush finished: ${submittedCount} submitted, ${failedCount} failed.`,
-    )
-  } else {
+
+    if (targets.length === 0) {
+      if (pageSubjectCode && prefs[pageSubjectCode]) {
+        api?.logger.warn(
+          `[exam-enroll-debug] autoEnrollSaved: saved exam date "${prefs[pageSubjectCode].date}" not found on current page`,
+        )
+        api?.statusPanel.addMessage(
+          'warn',
+          `Saved exam date "${prefs[pageSubjectCode].date}" not found on this page.`,
+        )
+      } else {
+        api?.logger.info(
+          '[exam-enroll-debug] autoEnrollSaved: no saved exam targets visible on this page',
+        )
+        api?.statusPanel.addMessage('info', 'No saved exam dates are visible on this page.')
+      }
+      showRetryButton()
+      return
+    }
+
     api?.statusPanel.addMessage(
       'info',
-      `Exam Rush submitted ${submittedCount} saved exam${submittedCount === 1 ? '' : 's'}.`,
+      `Exam Rush: ${targets.length} saved target${targets.length === 1 ? '' : 's'} visible.`,
     )
+    api?.statusPanel.setExamRushMode(false)
+    api?.statusPanel.addMessage('info', 'Exam Rush started and turned itself off.')
+
+    let failedCount = 0
+    let submittedCount = 0
+    let stoppedEarly = false
+    for (const target of targets) {
+      if (!isCurrentEnrollmentRun(api)) {
+        break
+      }
+
+      const result = await submitEnrollmentTarget(target)
+      if (result.submitted) {
+        submittedCount++
+        await delay(250)
+      }
+      if (result.failed) {
+        failedCount++
+        await delay(250)
+      }
+
+      if (result.shouldStop) {
+        stoppedEarly = true
+        break
+      }
+    }
+
+    if (!isCurrentEnrollmentRun(api)) {
+      return
+    }
+
+    if (submittedCount === 0 && failedCount === 0) {
+      api?.statusPanel.addMessage('warn', 'Exam Rush did not submit any visible saved exams.')
+      showRetryButton()
+    } else if (stoppedEarly) {
+      api?.statusPanel.addMessage(
+        'warn',
+        `Exam Rush stopped early: ${submittedCount} submitted, ${failedCount} failed.`,
+      )
+    } else if (failedCount > 0) {
+      api?.statusPanel.addMessage(
+        'warn',
+        `Exam Rush finished: ${submittedCount} submitted, ${failedCount} failed.`,
+      )
+    } else {
+      api?.statusPanel.addMessage(
+        'info',
+        `Exam Rush submitted ${submittedCount} saved exam${submittedCount === 1 ? '' : 's'}.`,
+      )
+    }
+  } finally {
+    setIsEnrollmentInProgress(false)
   }
 }
 
@@ -306,27 +433,6 @@ export function showRetryButton(): void {
   retryBtn.style.bottom = '60px'
   retryBtn.style.right = '20px'
   retryBtn.style.zIndex = '99998'
-}
-
-export function findConfirmButton(): HTMLElement | null {
-  const api = getApi()
-  const overlay = document.querySelector('.cdk-overlay-container')
-  if (!overlay) {
-    api?.logger.info('[exam-enroll-debug] findConfirmButton: no overlay container found')
-    return null
-  }
-  const buttons = Array.from(overlay.querySelectorAll('button'))
-  api?.logger.info(`[exam-enroll-debug] findConfirmButton: ${buttons.length} buttons in overlay`)
-  const btn = buttons.find((b) => {
-    const text = (b.textContent ?? '').trim()
-    return /meger[oő]s[ií]t/i.test(text) || text.includes('Igen') || text.includes('OK')
-  })
-  if (btn) {
-    api?.logger.info(
-      `[exam-enroll-debug] findConfirmButton: matched button text="${(btn.textContent ?? '').trim().substring(0, 30)}"`,
-    )
-  }
-  return (btn as HTMLElement) ?? null
 }
 
 export async function waitForExamTable(timeoutMs: number): Promise<boolean> {

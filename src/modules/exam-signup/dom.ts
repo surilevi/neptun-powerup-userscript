@@ -1,4 +1,15 @@
-import { getApi, getCachedSubjectCode, setCachedSubjectCode, getTableObserver, setTableObserver, getDebounceTimer, setDebounceTimer, getIsDisposed, HIGHLIGHT_STYLE } from './state'
+import {
+  getApi,
+  getCachedSubjectCode,
+  setCachedSubjectCode,
+  getTableObserver,
+  setTableObserver,
+  getDebounceTimer,
+  setDebounceTimer,
+  getIsDisposed,
+  getIsEnrollmentInProgress,
+  HIGHLIGHT_STYLE,
+} from './state'
 import type { ExamRowInfo } from './state'
 import { extractSubjectCodeFromText } from '../../utils/subject-code'
 
@@ -53,7 +64,9 @@ function getEnrollmentButton(row: HTMLTableRowElement): HTMLButtonElement | null
   return submitButton ?? null
 }
 
-function buildTableSubjectCodeMap(): Map<Element, string> {
+export type TableSubjectCodeMap = Map<Element, string>
+
+export function buildTableSubjectCodeMap(): TableSubjectCodeMap {
   const map = new Map<Element, string>()
   const root = document.querySelector('main') ?? document.body
   if (!root) return map
@@ -76,22 +89,28 @@ function buildTableSubjectCodeMap(): Map<Element, string> {
   return map
 }
 
-function getSubjectCodeForTable(table: Element | null): string | null {
+function getSubjectCodeForTable(
+  table: Element | null,
+  tableSubjectCodes: TableSubjectCodeMap = buildTableSubjectCodeMap(),
+): string | null {
   if (!table) return null
 
-  return buildTableSubjectCodeMap().get(table) ?? null
+  return tableSubjectCodes.get(table) ?? null
 }
 
-export function getRowSubjectCode(row: HTMLTableRowElement): string | null {
-  return getSubjectCodeForTable(row.closest('table'))
+export function getRowSubjectCode(
+  row: HTMLTableRowElement,
+  tableSubjectCodes: TableSubjectCodeMap = buildTableSubjectCodeMap(),
+): string | null {
+  return getSubjectCodeForTable(row.closest('table'), tableSubjectCodes)
 }
 
 function getPageSubjectCodes(): string[] {
   const uniqueCodes = new Set<string>()
+  const tableSubjectCodes = buildTableSubjectCodeMap()
 
-  for (const table of Array.from(document.querySelectorAll('table'))) {
-    const code = getSubjectCodeForTable(table)
-    if (code) uniqueCodes.add(code)
+  for (const code of tableSubjectCodes.values()) {
+    uniqueCodes.add(code)
   }
 
   return Array.from(uniqueCodes)
@@ -140,13 +159,17 @@ export function getSubjectCode(): string | null {
 
   const pageSubjectCodes = getPageSubjectCodes()
   if (pageSubjectCodes.length === 1) {
-    api?.logger.info(`[exam-dom-debug] getSubjectCode: found single page subject code="${pageSubjectCodes[0]}"`)
+    api?.logger.info(
+      `[exam-dom-debug] getSubjectCode: found single page subject code="${pageSubjectCodes[0]}"`,
+    )
     setCachedSubjectCode(pageSubjectCodes[0])
     return pageSubjectCodes[0]
   }
 
   if (pageSubjectCodes.length > 1) {
-    api?.logger.info('[exam-dom-debug] getSubjectCode: multiple subject tables detected, no single page subject code')
+    api?.logger.info(
+      '[exam-dom-debug] getSubjectCode: multiple subject tables detected, no single page subject code',
+    )
   }
 
   api?.logger.warn('[exam-dom-debug] getSubjectCode: no subject code found on page')
@@ -207,27 +230,38 @@ export interface SaveButtonInjectionStats {
   rowCount: number
 }
 
-export function addSaveButtonsToRows(subjectCode: string | null, onSave: (subjectCode: string, date: string, type: string, courseCode: string) => void): SaveButtonInjectionStats {
+export function addSaveButtonsToRows(
+  subjectCode: string | null,
+  onSave: (subjectCode: string, date: string, type: string, courseCode: string) => void,
+): SaveButtonInjectionStats {
   const api = getApi()
 
   // Remove any previously added save buttons
   document.querySelectorAll('.npu-exam-save-btn').forEach((b) => b.remove())
   document.querySelectorAll('.npu-exam-save-slot').forEach((slot) => slot.remove())
 
+  const tableSubjectCodes = buildTableSubjectCodeMap()
   const rows = getExamRows()
-  api?.logger.info(`[exam-dom-debug] addSaveButtonsToRows: processing ${rows.length} exam rows for ${subjectCode}`)
+  api?.logger.info(
+    `[exam-dom-debug] addSaveButtonsToRows: processing ${rows.length} exam rows for ${subjectCode}`,
+  )
   let addedCount = 0
   for (const row of rows) {
     const info = parseExamRow(row)
-    const resolvedSubjectCode = getSubjectCodeForTable(row.closest('table')) ?? subjectCode
+    const resolvedSubjectCode =
+      getSubjectCodeForTable(row.closest('table'), tableSubjectCodes) ?? subjectCode
     if (!resolvedSubjectCode) {
-      api?.logger.warn(`[exam-dom-debug] addSaveButtonsToRows: no subjectCode resolved for row date="${info.date}"`)
+      api?.logger.warn(
+        `[exam-dom-debug] addSaveButtonsToRows: no subjectCode resolved for row date="${info.date}"`,
+      )
       continue
     }
 
     const firstCell = row.querySelector('td')
     if (!firstCell) {
-      api?.logger.warn(`[exam-dom-debug] addSaveButtonsToRows: firstCell not found for row date="${info.date}"`)
+      api?.logger.warn(
+        `[exam-dom-debug] addSaveButtonsToRows: firstCell not found for row date="${info.date}"`,
+      )
       continue
     }
     addedCount++
@@ -259,11 +293,54 @@ export function addSaveButtonsToRows(subjectCode: string | null, onSave: (subjec
   }
 }
 
-export function watchTableForReRenders(subjectCode: string | null, onSave: (subjectCode: string, date: string, type: string, courseCode: string) => void): void {
+function isOwnInjectedNode(node: Node): boolean {
+  if (node instanceof Element) {
+    if (node.closest('#npu-status-root')) return true
+    if (node.classList.contains('npu-exam-save-slot') || node.closest('.npu-exam-save-slot'))
+      return true
+    if (node.classList.contains('npu-exam-save-btn') || node.closest('.npu-exam-save-btn'))
+      return true
+    return false
+  }
+
+  const parent = node.parentElement
+  return !!parent?.closest('#npu-status-root, .npu-exam-save-slot, .npu-exam-save-btn')
+}
+
+function scheduleSaveButtonRefresh(
+  subjectCode: string | null,
+  onSave: (subjectCode: string, date: string, type: string, courseCode: string) => void,
+  delayMs: number,
+): void {
+  const currentTimer = getDebounceTimer()
+  if (currentTimer) clearTimeout(currentTimer)
+
+  setDebounceTimer(
+    setTimeout(() => {
+      setDebounceTimer(null)
+      if (getIsDisposed()) return
+
+      if (getIsEnrollmentInProgress()) {
+        scheduleSaveButtonRefresh(subjectCode, onSave, 500)
+        return
+      }
+
+      addSaveButtonsToRows(subjectCode, onSave)
+    }, delayMs),
+  )
+}
+
+export function watchTableForReRenders(
+  subjectCode: string | null,
+  onSave: (subjectCode: string, date: string, type: string, courseCode: string) => void,
+): void {
   const api = getApi()
   getTableObserver()?.disconnect()
   const timer = getDebounceTimer()
-  if (timer) { clearTimeout(timer); setDebounceTimer(null) }
+  if (timer) {
+    clearTimeout(timer)
+    setDebounceTimer(null)
+  }
   const observerTarget = document.querySelector('main') ?? document.body
   if (!observerTarget) {
     api?.logger.info('[exam-dom-debug] watchTableForReRenders: skipping, no observer target')
@@ -274,29 +351,29 @@ export function watchTableForReRenders(subjectCode: string | null, onSave: (subj
     if (getIsDisposed()) return
 
     const hasRelevantMutation = mutations.some((mutation) => {
-      const changedNodes = [...Array.from(mutation.addedNodes), ...Array.from(mutation.removedNodes)]
+      if (isOwnInjectedNode(mutation.target)) return false
+
+      const changedNodes = [
+        ...Array.from(mutation.addedNodes),
+        ...Array.from(mutation.removedNodes),
+      ]
       if (changedNodes.length === 0) return false
 
       return changedNodes.some((node) => {
-        if (!(node instanceof Element)) return true
-        if (node.closest('#npu-status-root')) return false
-        if (node.classList.contains('npu-exam-save-slot') || node.closest('.npu-exam-save-slot')) return false
-        if (node.classList.contains('npu-exam-save-btn') || node.closest('.npu-exam-save-btn')) return false
+        if (isOwnInjectedNode(node)) return false
         return true
       })
     })
 
     if (!hasRelevantMutation) return
 
-    const currentTimer = getDebounceTimer()
-    if (currentTimer) clearTimeout(currentTimer)
-    setDebounceTimer(setTimeout(() => {
-      if (!getIsDisposed()) addSaveButtonsToRows(subjectCode, onSave)
-    }, 300))
+    scheduleSaveButtonRefresh(subjectCode, onSave, getIsEnrollmentInProgress() ? 500 : 300)
   })
   newObserver.observe(observerTarget, { childList: true, subtree: true })
   setTableObserver(newObserver)
-  api?.logger.info('[exam-dom-debug] watchTableForReRenders: MutationObserver attached to page container')
+  api?.logger.info(
+    '[exam-dom-debug] watchTableForReRenders: MutationObserver attached to page container',
+  )
 }
 
 export function highlightSavedRow(pref: { date: string }): void {

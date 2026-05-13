@@ -11,7 +11,7 @@ import { loadPreferences, savePreferences } from './storage'
 import { autoEnrollSaved } from './enroll'
 import { isDebugEnabled } from '../../utils/debug'
 
-const EXAM_UI_BUILD = '3.1.0 publish-prep-a'
+const EXAM_UI_BUILD = '3.1.3 fast-confirm-a'
 
 async function savePreferredExam(
   subjectCode: string,

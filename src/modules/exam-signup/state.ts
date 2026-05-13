@@ -19,12 +19,14 @@ export interface ExamRowInfo {
 }
 
 export const STORAGE_KEY = 'examPreferences'
-export const HIGHLIGHT_STYLE = 'background-color: rgba(76, 175, 80, 0.15) !important; border-left: 3px solid #4caf50 !important;'
+export const HIGHLIGHT_STYLE =
+  'background-color: rgba(76, 175, 80, 0.15) !important; border-left: 3px solid #4caf50 !important;'
 
 let api: ModuleApi | null = null
 let tableObserver: MutationObserver | null = null
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let isDisposed = false
+let isEnrollmentInProgress = false
 let cachedSubjectCode: string | null | undefined = undefined
 
 export function getApi(): ModuleApi | null {
@@ -57,6 +59,14 @@ export function getIsDisposed(): boolean {
 
 export function setIsDisposed(value: boolean): void {
   isDisposed = value
+}
+
+export function getIsEnrollmentInProgress(): boolean {
+  return isEnrollmentInProgress
+}
+
+export function setIsEnrollmentInProgress(value: boolean): void {
+  isEnrollmentInProgress = value
 }
 
 export function getCachedSubjectCode(): string | null | undefined {

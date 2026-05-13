@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neptun PowerUp!
 // @namespace    npu
-// @version      3.1.2
+// @version      3.1.3
 // @author       surilevi
 // @description  Neptun helper userscript for course and exam workflows
 // @license      MIT
@@ -1777,14 +1777,26 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   function waitForRequestComplete(urlPattern, timeoutMs, startedAfterMs = performance.now()) {
     return new Promise((resolve) => {
       let settled = false;
+      let observer = null;
+      let pollTimer = null;
+      let timeoutTimer = null;
       function matches(entry) {
         if (!entry.name.includes(urlPattern)) return false;
         return typeof entry.startTime !== "number" || entry.startTime >= startedAfterMs;
       }
+      function findMatchingEntry() {
+        try {
+          return performance.getEntriesByType("resource").find(matches) ?? null;
+        } catch {
+          return null;
+        }
+      }
       function settle(result) {
         if (settled) return;
         settled = true;
-        observer.disconnect();
+        observer?.disconnect();
+        if (pollTimer) clearInterval(pollTimer);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
         resolve(result);
       }
       function settleFromEntry(entry) {
@@ -1795,26 +1807,43 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
           status
         });
       }
-      const existingEntries = performance.getEntriesByType("resource");
-      const existingMatch = existingEntries.find(matches);
+      function checkExistingEntries() {
+        const match = findMatchingEntry();
+        if (match) settleFromEntry(match);
+      }
+      function startPollingFallback() {
+        if (pollTimer) return;
+        pollTimer = setInterval(checkExistingEntries, 100);
+      }
+      const existingMatch = findMatchingEntry();
       if (existingMatch) {
         settleFromEntry(existingMatch);
         return;
       }
-      const observer = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) {
-          if (matches(entry)) {
-            settleFromEntry(entry);
-            return;
+      try {
+        observer = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            if (matches(entry)) {
+              settleFromEntry(entry);
+              return;
+            }
+          }
+        });
+        try {
+          observer.observe({ type: "resource", buffered: true });
+        } catch {
+          try {
+            observer.observe({ type: "resource", buffered: false });
+          } catch {
+            observer.disconnect();
+            observer = null;
+            startPollingFallback();
           }
         }
-      });
-      try {
-        observer.observe({ type: "resource", buffered: true });
       } catch {
-        observer.observe({ type: "resource", buffered: false });
+        startPollingFallback();
       }
-      setTimeout(() => settle({ completed: false, status: null }), timeoutMs);
+      timeoutTimer = setTimeout(() => settle({ completed: false, status: null }), timeoutMs);
     });
   }
   const SUBJECT_CODE_CANDIDATE_RE = /\b[A-Z0-9][A-Z0-9-]{5,24}\b/g;
@@ -1889,7 +1918,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   const AUTO_SEARCH_POLL_MS = 250;
   const AUTO_SEARCH_STABLE_MS = 500;
   const SEARCH_RESULT_SETTLE_GRACE_MS = 2e3;
-  function normalizeButtonText(text) {
+  function normalizeButtonText$1(text) {
     return text.normalize("NFD").replace(new RegExp("\\p{Diacritic}", "gu"), "").replace(/\s+/g, " ").trim().toLowerCase();
   }
   const SEARCH_BUTTON_PATTERNS = [
@@ -1973,11 +2002,11 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     return candidates;
   }
   function isSearchButtonText(text) {
-    const normalized = normalizeButtonText(text);
+    const normalized = normalizeButtonText$1(text);
     return SEARCH_BUTTON_PATTERNS.some((pattern) => normalized.includes(pattern));
   }
   function isEnrollButtonText(text) {
-    const normalized = normalizeButtonText(text);
+    const normalized = normalizeButtonText$1(text);
     return ENROLL_BUTTON_PATTERNS.some((pattern) => normalized.includes(pattern));
   }
   function findSearchButton() {
@@ -1985,7 +2014,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     const match = buttons.find((btn) => isSearchButtonText(btn.textContent ?? ""));
     return match ?? null;
   }
-  function isButtonInteractable(button) {
+  function isButtonInteractable$1(button) {
     if (!button.isConnected) return false;
     if (button.hasAttribute("disabled")) return false;
     const htmlButton = button;
@@ -2163,7 +2192,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       }
       const searchBtn = findSearchButton();
       if (searchBtn) {
-        const interactable = isButtonInteractable(searchBtn);
+        const interactable = isButtonInteractable$1(searchBtn);
         const candidateState = JSON.stringify({
           ...describeButton(searchBtn),
           interactable
@@ -2295,7 +2324,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       const idleMs = Date.now() - lastMutationAt;
       const searchBtn = findSearchButton();
       if (searchBtn) {
-        const interactable = isButtonInteractable(searchBtn);
+        const interactable = isButtonInteractable$1(searchBtn);
         const candidateState = JSON.stringify({
           ...describeButton(searchBtn),
           interactable
@@ -2339,7 +2368,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
             requestStatus: settledRequest.status
           };
         }
-        const interactable = searchBtn ? isButtonInteractable(searchBtn) : false;
+        const interactable = searchBtn ? isButtonInteractable$1(searchBtn) : false;
         if (idleMs >= AUTO_SEARCH_STABLE_MS && requestSettledForMs >= SEARCH_RESULT_SETTLE_GRACE_MS && (interactable || searchBtn === null)) {
           observer?.disconnect();
           api2?.logger.info("[dom-debug] waitForSubjectListing: search settled without subject panels", {
@@ -2951,6 +2980,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   let tableObserver = null;
   let debounceTimer = null;
   let isDisposed = false;
+  let isEnrollmentInProgress = false;
   let cachedSubjectCode = void 0;
   function getApi() {
     return api;
@@ -2975,6 +3005,12 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   }
   function setIsDisposed(value) {
     isDisposed = value;
+  }
+  function getIsEnrollmentInProgress() {
+    return isEnrollmentInProgress;
+  }
+  function setIsEnrollmentInProgress(value) {
+    isEnrollmentInProgress = value;
   }
   function getCachedSubjectCode() {
     return cachedSubjectCode;
@@ -3034,18 +3070,18 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     }
     return map;
   }
-  function getSubjectCodeForTable(table) {
+  function getSubjectCodeForTable(table, tableSubjectCodes = buildTableSubjectCodeMap()) {
     if (!table) return null;
-    return buildTableSubjectCodeMap().get(table) ?? null;
+    return tableSubjectCodes.get(table) ?? null;
   }
-  function getRowSubjectCode(row) {
-    return getSubjectCodeForTable(row.closest("table"));
+  function getRowSubjectCode(row, tableSubjectCodes = buildTableSubjectCodeMap()) {
+    return getSubjectCodeForTable(row.closest("table"), tableSubjectCodes);
   }
   function getPageSubjectCodes() {
     const uniqueCodes = new Set();
-    for (const table of Array.from(document.querySelectorAll("table"))) {
-      const code = getSubjectCodeForTable(table);
-      if (code) uniqueCodes.add(code);
+    const tableSubjectCodes = buildTableSubjectCodeMap();
+    for (const code of tableSubjectCodes.values()) {
+      uniqueCodes.add(code);
     }
     return Array.from(uniqueCodes);
   }
@@ -3085,12 +3121,16 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     }
     const pageSubjectCodes = getPageSubjectCodes();
     if (pageSubjectCodes.length === 1) {
-      api2?.logger.info(`[exam-dom-debug] getSubjectCode: found single page subject code="${pageSubjectCodes[0]}"`);
+      api2?.logger.info(
+        `[exam-dom-debug] getSubjectCode: found single page subject code="${pageSubjectCodes[0]}"`
+      );
       setCachedSubjectCode(pageSubjectCodes[0]);
       return pageSubjectCodes[0];
     }
     if (pageSubjectCodes.length > 1) {
-      api2?.logger.info("[exam-dom-debug] getSubjectCode: multiple subject tables detected, no single page subject code");
+      api2?.logger.info(
+        "[exam-dom-debug] getSubjectCode: multiple subject tables detected, no single page subject code"
+      );
     }
     api2?.logger.warn("[exam-dom-debug] getSubjectCode: no subject code found on page");
     setCachedSubjectCode(null);
@@ -3140,19 +3180,26 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     const api2 = getApi();
     document.querySelectorAll(".npu-exam-save-btn").forEach((b) => b.remove());
     document.querySelectorAll(".npu-exam-save-slot").forEach((slot) => slot.remove());
+    const tableSubjectCodes = buildTableSubjectCodeMap();
     const rows = getExamRows();
-    api2?.logger.info(`[exam-dom-debug] addSaveButtonsToRows: processing ${rows.length} exam rows for ${subjectCode}`);
+    api2?.logger.info(
+      `[exam-dom-debug] addSaveButtonsToRows: processing ${rows.length} exam rows for ${subjectCode}`
+    );
     let addedCount = 0;
     for (const row of rows) {
       const info = parseExamRow(row);
-      const resolvedSubjectCode = getSubjectCodeForTable(row.closest("table")) ?? subjectCode;
+      const resolvedSubjectCode = getSubjectCodeForTable(row.closest("table"), tableSubjectCodes) ?? subjectCode;
       if (!resolvedSubjectCode) {
-        api2?.logger.warn(`[exam-dom-debug] addSaveButtonsToRows: no subjectCode resolved for row date="${info.date}"`);
+        api2?.logger.warn(
+          `[exam-dom-debug] addSaveButtonsToRows: no subjectCode resolved for row date="${info.date}"`
+        );
         continue;
       }
       const firstCell = row.querySelector("td");
       if (!firstCell) {
-        api2?.logger.warn(`[exam-dom-debug] addSaveButtonsToRows: firstCell not found for row date="${info.date}"`);
+        api2?.logger.warn(
+          `[exam-dom-debug] addSaveButtonsToRows: firstCell not found for row date="${info.date}"`
+        );
         continue;
       }
       addedCount++;
@@ -3179,6 +3226,33 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       rowCount: rows.length
     };
   }
+  function isOwnInjectedNode(node) {
+    if (node instanceof Element) {
+      if (node.closest("#npu-status-root")) return true;
+      if (node.classList.contains("npu-exam-save-slot") || node.closest(".npu-exam-save-slot"))
+        return true;
+      if (node.classList.contains("npu-exam-save-btn") || node.closest(".npu-exam-save-btn"))
+        return true;
+      return false;
+    }
+    const parent = node.parentElement;
+    return !!parent?.closest("#npu-status-root, .npu-exam-save-slot, .npu-exam-save-btn");
+  }
+  function scheduleSaveButtonRefresh(subjectCode, onSave, delayMs) {
+    const currentTimer = getDebounceTimer();
+    if (currentTimer) clearTimeout(currentTimer);
+    setDebounceTimer(
+      setTimeout(() => {
+        setDebounceTimer(null);
+        if (getIsDisposed()) return;
+        if (getIsEnrollmentInProgress()) {
+          scheduleSaveButtonRefresh(subjectCode, onSave, 500);
+          return;
+        }
+        addSaveButtonsToRows(subjectCode, onSave);
+      }, delayMs)
+    );
+  }
   function watchTableForReRenders(subjectCode, onSave) {
     const api2 = getApi();
     getTableObserver()?.disconnect();
@@ -3195,26 +3269,25 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     const newObserver = new MutationObserver((mutations) => {
       if (getIsDisposed()) return;
       const hasRelevantMutation = mutations.some((mutation) => {
-        const changedNodes = [...Array.from(mutation.addedNodes), ...Array.from(mutation.removedNodes)];
+        if (isOwnInjectedNode(mutation.target)) return false;
+        const changedNodes = [
+          ...Array.from(mutation.addedNodes),
+          ...Array.from(mutation.removedNodes)
+        ];
         if (changedNodes.length === 0) return false;
         return changedNodes.some((node) => {
-          if (!(node instanceof Element)) return true;
-          if (node.closest("#npu-status-root")) return false;
-          if (node.classList.contains("npu-exam-save-slot") || node.closest(".npu-exam-save-slot")) return false;
-          if (node.classList.contains("npu-exam-save-btn") || node.closest(".npu-exam-save-btn")) return false;
+          if (isOwnInjectedNode(node)) return false;
           return true;
         });
       });
       if (!hasRelevantMutation) return;
-      const currentTimer = getDebounceTimer();
-      if (currentTimer) clearTimeout(currentTimer);
-      setDebounceTimer(setTimeout(() => {
-        if (!getIsDisposed()) addSaveButtonsToRows(subjectCode, onSave);
-      }, 300));
+      scheduleSaveButtonRefresh(subjectCode, onSave, getIsEnrollmentInProgress() ? 500 : 300);
     });
     newObserver.observe(observerTarget, { childList: true, subtree: true });
     setTableObserver(newObserver);
-    api2?.logger.info("[exam-dom-debug] watchTableForReRenders: MutationObserver attached to page container");
+    api2?.logger.info(
+      "[exam-dom-debug] watchTableForReRenders: MutationObserver attached to page container"
+    );
   }
   function highlightSavedRow(pref) {
     clearHighlights();
@@ -3251,12 +3324,15 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     if (!api2) return;
     await api2.storage.setForDomain(STORAGE_KEY, prefs);
   }
+  const CONFIRM_BUTTON_WAIT_MS = 1500;
+  const CONFIRM_BUTTON_POLL_MS = 50;
   function isCurrentEnrollmentRun(apiRef) {
     return !getIsDisposed() && getApi() === apiRef;
   }
   function resolveCurrentTargetInfo(target) {
+    const tableSubjectCodes = buildTableSubjectCodeMap();
     for (const row of getExamRows()) {
-      const subjectCode = getRowSubjectCode(row);
+      const subjectCode = getRowSubjectCode(row, tableSubjectCodes);
       if (subjectCode !== target.subjectCode) continue;
       const info = parseExamRow(row);
       if (info.date !== target.pref.date) continue;
@@ -3272,16 +3348,92 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   }
   function findSavedExamTargets(prefs) {
     const targets = [];
+    const tableSubjectCodes = buildTableSubjectCodeMap();
     for (const row of getExamRows()) {
-      const subjectCode = getRowSubjectCode(row);
+      const subjectCode = getRowSubjectCode(row, tableSubjectCodes);
       if (!subjectCode) continue;
       const pref = prefs[subjectCode];
       if (!pref) continue;
-      const info = parseExamRow(row);
-      if (info.date !== pref.date) continue;
-      targets.push({ subjectCode, pref, info });
+      if (parseExamRow(row).date !== pref.date) continue;
+      targets.push({ subjectCode, pref });
     }
     return targets;
+  }
+  function hasSessionToken() {
+    const api2 = getApi();
+    try {
+      const token = sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken);
+      if (!token) {
+        api2?.logger.warn("no access_token in sessionStorage - session may have expired");
+        api2?.statusPanel.addMessage("error", "Session expired. Log in again before enrolling.");
+        return false;
+      }
+    } catch (err) {
+      api2?.logger.warn("cannot check sessionStorage for access_token:", err);
+    }
+    return true;
+  }
+  function normalizeButtonText(text) {
+    return text.normalize("NFD").replace(new RegExp("\\p{Diacritic}", "gu"), "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+  function isConfirmButtonText(text) {
+    const normalized = normalizeButtonText(text);
+    return normalized.includes("megerosit") || normalized.includes("confirm") || normalized === "igen" || normalized === "ok";
+  }
+  function isButtonInteractable(button) {
+    if (!button.isConnected) return false;
+    if (button.hasAttribute("disabled")) return false;
+    const htmlButton = button;
+    if (typeof htmlButton.disabled === "boolean" && htmlButton.disabled) return false;
+    const ariaDisabled = button.getAttribute("aria-disabled");
+    if (ariaDisabled === "true") return false;
+    const style = window.getComputedStyle(button);
+    return style.display !== "none" && style.visibility !== "hidden" && style.pointerEvents !== "none";
+  }
+  function findConfirmButtonElement() {
+    const overlay = document.querySelector(".cdk-overlay-container");
+    if (!overlay) return null;
+    const buttons = Array.from(overlay.querySelectorAll("button"));
+    const btn = buttons.find(
+      (button) => isConfirmButtonText(button.textContent ?? "") && isButtonInteractable(button)
+    );
+    return btn ?? null;
+  }
+  function waitForConfirmButton(timeoutMs = CONFIRM_BUTTON_WAIT_MS, stopWhen) {
+    return new Promise((resolve) => {
+      let settled = false;
+      let observer = null;
+      let pollTimer = null;
+      let timeoutTimer = null;
+      function cleanup() {
+        observer?.disconnect();
+        if (pollTimer) clearInterval(pollTimer);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+      }
+      function settle(button) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(button);
+      }
+      function check() {
+        const button = findConfirmButtonElement();
+        if (button) settle(button);
+      }
+      check();
+      if (settled) return;
+      const observerTarget = document.body ?? document.documentElement;
+      if (observerTarget) {
+        observer = new MutationObserver(check);
+        observer.observe(observerTarget, { attributes: true, childList: true, subtree: true });
+      }
+      pollTimer = setInterval(check, CONFIRM_BUTTON_POLL_MS);
+      timeoutTimer = setTimeout(() => settle(null), timeoutMs);
+      stopWhen?.then(
+        () => settle(null),
+        () => settle(null)
+      );
+    });
   }
   async function submitEnrollmentTarget(target) {
     const api2 = getApi();
@@ -3342,23 +3494,16 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       requestStartedAt
     );
     info.felvetelBtn.click();
-    await delay(500);
     if (isCurrentEnrollmentRun(api2)) {
-      const confirmBtn = findConfirmButton();
+      const confirmBtn = await waitForConfirmButton(CONFIRM_BUTTON_WAIT_MS, requestPromise);
       if (confirmBtn) {
         api2?.logger.info("[exam-enroll-debug] dialog found, confirming");
         confirmBtn.click();
-        const closeStart = Date.now();
-        while (Date.now() - closeStart < 2e3 && isCurrentEnrollmentRun(api2)) {
-          if (!findConfirmButton()) break;
-          await delay(100);
-        }
       } else {
-        api2?.logger.info("[exam-enroll-debug] no dialog - enrollment submitted directly");
+        api2?.logger.info(
+          "[exam-enroll-debug] no dialog - enrollment submitted directly or confirmation did not appear"
+        );
       }
-    }
-    if (isCurrentEnrollmentRun(api2)) {
-      await delay(500);
     }
     if (!isCurrentEnrollmentRun(api2)) {
       return { failed: false, submitted: false, shouldStop: true };
@@ -3393,83 +3538,93 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   }
   async function autoEnrollSaved() {
     const api2 = getApi();
-    const prefs = await loadPreferences();
-    if (Object.keys(prefs).length === 0) {
-      api2?.logger.info("[exam-enroll-debug] autoEnrollSaved: no saved preferences found");
-      api2?.statusPanel.addMessage("info", "No saved exam dates found.");
+    if (getIsEnrollmentInProgress()) {
+      api2?.logger.warn("[exam-enroll-debug] autoEnrollSaved: enrollment already in progress");
       return;
     }
-    const pageSubjectCode = getSubjectCode();
-    const targets = findSavedExamTargets(prefs);
-    api2?.logger.info(
-      `[exam-enroll-debug] autoEnrollSaved: found ${targets.length} saved targets on the current page`
-    );
-    if (targets.length === 0) {
-      if (pageSubjectCode && prefs[pageSubjectCode]) {
-        api2?.logger.warn(
-          `[exam-enroll-debug] autoEnrollSaved: saved exam date "${prefs[pageSubjectCode].date}" not found on current page`
-        );
-        api2?.statusPanel.addMessage(
-          "warn",
-          `Saved exam date "${prefs[pageSubjectCode].date}" not found on this page.`
-        );
-      } else {
-        api2?.logger.info(
-          "[exam-enroll-debug] autoEnrollSaved: no saved exam targets visible on this page"
-        );
-        api2?.statusPanel.addMessage("info", "No saved exam dates are visible on this page.");
+    if (!hasSessionToken()) return;
+    setIsEnrollmentInProgress(true);
+    try {
+      const prefs = await loadPreferences();
+      if (Object.keys(prefs).length === 0) {
+        api2?.logger.info("[exam-enroll-debug] autoEnrollSaved: no saved preferences found");
+        api2?.statusPanel.addMessage("info", "No saved exam dates found.");
+        return;
       }
-      showRetryButton();
-      return;
-    }
-    api2?.statusPanel.addMessage(
-      "info",
-      `Exam Rush: ${targets.length} saved target${targets.length === 1 ? "" : "s"} visible.`
-    );
-    api2?.statusPanel.setExamRushMode(false);
-    api2?.statusPanel.addMessage("info", "Exam Rush started and turned itself off.");
-    let failedCount = 0;
-    let submittedCount = 0;
-    let stoppedEarly = false;
-    for (const target of targets) {
-      if (!isCurrentEnrollmentRun(api2)) {
-        break;
-      }
-      const result = await submitEnrollmentTarget(target);
-      if (result.submitted) {
-        submittedCount++;
-        await delay(250);
-      }
-      if (result.failed) {
-        failedCount++;
-        await delay(250);
-      }
-      if (result.shouldStop) {
-        stoppedEarly = true;
-        break;
-      }
-    }
-    if (!isCurrentEnrollmentRun(api2)) {
-      return;
-    }
-    if (submittedCount === 0 && failedCount === 0) {
-      api2?.statusPanel.addMessage("warn", "Exam Rush did not submit any visible saved exams.");
-      showRetryButton();
-    } else if (stoppedEarly) {
-      api2?.statusPanel.addMessage(
-        "warn",
-        `Exam Rush stopped early: ${submittedCount} submitted, ${failedCount} failed.`
+      const pageSubjectCode = getSubjectCode();
+      const targets = findSavedExamTargets(prefs);
+      api2?.logger.info(
+        `[exam-enroll-debug] autoEnrollSaved: found ${targets.length} saved targets on the current page`
       );
-    } else if (failedCount > 0) {
-      api2?.statusPanel.addMessage(
-        "warn",
-        `Exam Rush finished: ${submittedCount} submitted, ${failedCount} failed.`
-      );
-    } else {
+      if (targets.length === 0) {
+        if (pageSubjectCode && prefs[pageSubjectCode]) {
+          api2?.logger.warn(
+            `[exam-enroll-debug] autoEnrollSaved: saved exam date "${prefs[pageSubjectCode].date}" not found on current page`
+          );
+          api2?.statusPanel.addMessage(
+            "warn",
+            `Saved exam date "${prefs[pageSubjectCode].date}" not found on this page.`
+          );
+        } else {
+          api2?.logger.info(
+            "[exam-enroll-debug] autoEnrollSaved: no saved exam targets visible on this page"
+          );
+          api2?.statusPanel.addMessage("info", "No saved exam dates are visible on this page.");
+        }
+        showRetryButton();
+        return;
+      }
       api2?.statusPanel.addMessage(
         "info",
-        `Exam Rush submitted ${submittedCount} saved exam${submittedCount === 1 ? "" : "s"}.`
+        `Exam Rush: ${targets.length} saved target${targets.length === 1 ? "" : "s"} visible.`
       );
+      api2?.statusPanel.setExamRushMode(false);
+      api2?.statusPanel.addMessage("info", "Exam Rush started and turned itself off.");
+      let failedCount = 0;
+      let submittedCount = 0;
+      let stoppedEarly = false;
+      for (const target of targets) {
+        if (!isCurrentEnrollmentRun(api2)) {
+          break;
+        }
+        const result = await submitEnrollmentTarget(target);
+        if (result.submitted) {
+          submittedCount++;
+          await delay(250);
+        }
+        if (result.failed) {
+          failedCount++;
+          await delay(250);
+        }
+        if (result.shouldStop) {
+          stoppedEarly = true;
+          break;
+        }
+      }
+      if (!isCurrentEnrollmentRun(api2)) {
+        return;
+      }
+      if (submittedCount === 0 && failedCount === 0) {
+        api2?.statusPanel.addMessage("warn", "Exam Rush did not submit any visible saved exams.");
+        showRetryButton();
+      } else if (stoppedEarly) {
+        api2?.statusPanel.addMessage(
+          "warn",
+          `Exam Rush stopped early: ${submittedCount} submitted, ${failedCount} failed.`
+        );
+      } else if (failedCount > 0) {
+        api2?.statusPanel.addMessage(
+          "warn",
+          `Exam Rush finished: ${submittedCount} submitted, ${failedCount} failed.`
+        );
+      } else {
+        api2?.statusPanel.addMessage(
+          "info",
+          `Exam Rush submitted ${submittedCount} saved exam${submittedCount === 1 ? "" : "s"}.`
+        );
+      }
+    } finally {
+      setIsEnrollmentInProgress(false);
     }
   }
   function showRetryButton() {
@@ -3489,26 +3644,6 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     retryBtn.style.bottom = "60px";
     retryBtn.style.right = "20px";
     retryBtn.style.zIndex = "99998";
-  }
-  function findConfirmButton() {
-    const api2 = getApi();
-    const overlay = document.querySelector(".cdk-overlay-container");
-    if (!overlay) {
-      api2?.logger.info("[exam-enroll-debug] findConfirmButton: no overlay container found");
-      return null;
-    }
-    const buttons = Array.from(overlay.querySelectorAll("button"));
-    api2?.logger.info(`[exam-enroll-debug] findConfirmButton: ${buttons.length} buttons in overlay`);
-    const btn = buttons.find((b) => {
-      const text = (b.textContent ?? "").trim();
-      return /meger[oő]s[ií]t/i.test(text) || text.includes("Igen") || text.includes("OK");
-    });
-    if (btn) {
-      api2?.logger.info(
-        `[exam-enroll-debug] findConfirmButton: matched button text="${(btn.textContent ?? "").trim().substring(0, 30)}"`
-      );
-    }
-    return btn ?? null;
   }
   async function waitForExamTable(timeoutMs) {
     const api2 = getApi();
@@ -3531,7 +3666,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     );
     return false;
   }
-  const EXAM_UI_BUILD = "3.1.0 publish-prep-a";
+  const EXAM_UI_BUILD = "3.1.3 fast-confirm-a";
   async function savePreferredExam(subjectCode, date, type, courseCode) {
     const api2 = getApi();
     const prefs = await loadPreferences();
@@ -3671,6 +3806,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     async initialize(moduleApi) {
       setApi(moduleApi);
       setIsDisposed(false);
+      setIsEnrollmentInProgress(false);
       const api2 = moduleApi;
       const tableReady = await waitForExamTable(5e3);
       if (!tableReady) {
@@ -3696,6 +3832,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     },
     dispose() {
       setIsDisposed(true);
+      setIsEnrollmentInProgress(false);
       const timer = getDebounceTimer();
       if (timer) {
         clearTimeout(timer);
