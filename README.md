@@ -4,7 +4,7 @@ A Tampermonkey userscript for Neptun student portals.
 
 Hungarian documentation: [README.hu.md](README.hu.md)
 
-Neptun PowerUp! helps with the parts of Neptun that usually mean repeating the same clicks: saving course selections, restoring them during registration, keeping the current session alive, and rejoining saved exam dates.
+Neptun PowerUp! helps with the parts of Neptun that usually mean repeating the same clicks: saving course selections, restoring them during registration, nudging the current session to stay alive during normal use, and rejoining saved exam dates.
 
 > Important: this tool automates parts of the Neptun UI. Use it at your own risk and check your university's rules before relying on it.
 
@@ -23,7 +23,7 @@ Neptun PowerUp! helps with the parts of Neptun that usually mean repeating the s
 - Course Rush: loads saved courses and tries to enroll them one by one.
 - Exam Quick Signup: saves a preferred exam date and tries to enroll it with one click.
 - Exam Rush: scans the visible exam page for saved exam targets.
-- Infinite Session: tries to keep the current Neptun session alive.
+- Infinite Session: best-effort session nudges during normal use. Neptun can still force logout during course or exam registration rushes.
 - Theme: optional accent colors for the Neptun UI.
 
 ## Portal Paths
@@ -54,6 +54,7 @@ For verbose debug logs, run `localStorage.npu_debug = 'true'` in the browser con
 - Subject and exam detection is heuristic. Unusual local labels may need tuning.
 - Enrollment runs sequentially on purpose. Neptun often handles parallel requests badly.
 - Exam features work on the currently open exam page. They do not browse every subject page on their own.
+- Infinite Session cannot guarantee registration-day persistence. During heavy course or exam signup windows, Neptun may invalidate the session server-side no matter what the browser does.
 
 ## Privacy
 

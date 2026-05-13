@@ -1,4 +1,3 @@
-import { delay } from '../../utils/async'
 import { SESSION_STORAGE_KEYS } from '../../types/neptun-api'
 import { getApi, getIsEnrolling, setIsEnrolling } from './state'
 import {
@@ -12,44 +11,6 @@ import {
 import { loadSelections } from './storage'
 import { loadStoredSelections } from './load'
 import { waitForRequestComplete } from '../../utils/xhr'
-
-/**
- * Check if the access token is about to expire (<30s remaining).
- * If so, trigger a lightweight API request to force Angular's token refresh
- * interceptor, then wait briefly for the new token to arrive.
- */
-async function ensureTokenFresh(): Promise<void> {
-  const api = getApi()
-  try {
-    const token = sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken)
-    if (!token) return
-    const parts = token.split('.')
-    if (parts.length !== 3) return
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')))
-    const expiresAt = payload.exp * 1000
-    const remaining = expiresAt - Date.now()
-    api?.logger.info(`[enroll-debug] ensureTokenFresh: remaining=${Math.round(remaining / 1000)}s`)
-    if (remaining < 30000) {
-      api?.logger.info(
-        '[enroll-debug] ensureTokenFresh: token expiring soon, triggering refresh...',
-      )
-      const pathPrefix = window.location.pathname.split('/')[1] || 'hallgatoi'
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 5000)
-      try {
-        await fetch(`/${pathPrefix}/api/Message/GetUnreadedMessagesCount`, {
-          signal: controller.signal,
-        })
-      } finally {
-        clearTimeout(timeoutId)
-      }
-      await delay(2000)
-      api?.logger.info('[enroll-debug] ensureTokenFresh: refresh triggered, continuing')
-    }
-  } catch {
-    // Non-critical - proceed with enrollment anyway
-  }
-}
 
 export async function quickEnrollAll(): Promise<void> {
   const api = getApi()
@@ -89,9 +50,6 @@ export async function quickEnrollAll(): Promise<void> {
       api?.statusPanel.addMessage('warn', msg)
       return
     }
-
-    // Check token freshness once before the batch
-    await ensureTokenFresh()
 
     api?.statusPanel.addMessage(
       'info',

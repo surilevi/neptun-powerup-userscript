@@ -2,7 +2,7 @@
 
 Magyar nyelvű Tampermonkey userscript Neptunhoz. A célja egyszerű: kevesebb ismétlődő kattintás, kevesebb kapkodás tárgyfelvételkor és vizsgajelentkezéskor.
 
-A script nem helyetted dönt, és nem kerül meg Neptun-szabályokat. A már kiválasztott kurzusokat és vizsgaidőpontokat tudja elmenteni, visszatölteni, majd kérésre végigkattintani. Emellett próbálja életben tartani az aktív munkamenetet, hogy ritkábban dobjon ki a Neptun.
+A script nem helyetted dönt, és nem kerül meg Neptun-szabályokat. A már kiválasztott kurzusokat és vizsgaidőpontokat tudja elmenteni, visszatölteni, majd kérésre végigkattintani. Emellett normál használat közben próbálja életben tartani az aktív munkamenetet, de nagy terhelésű tárgyfelvételi vagy vizsgajelentkezési időszakban ezt nem lehet garantálni.
 
 > Fontos: ez a projekt böngészőben futó automatizálást végez a Neptun felületén. Csak saját felelősségre használd, és vedd figyelembe a saját intézményed szabályait.
 
@@ -12,7 +12,7 @@ A script nem helyetted dönt, és nem kerül meg Neptun-szabályokat. A már kiv
 - `Course Rush`: a mentett tárgyválasztást visszatölti, majd sorban megpróbálja felvenni a tárgyakat.
 - `Exam Quick Signup`: elment egy választott vizsgaidőpontot, majd később egy kattintással megpróbál jelentkezni rá.
 - `Exam Rush`: az aktuálisan látható vizsgaoldalon végigpróbálja a mentett vizsgacélokat.
-- `Infinite Session`: megpróbálja frissen tartani a munkamenetet.
+- `Infinite Session`: normál használat közben megpróbálja frissen tartani a munkamenetet. Tárgyfelvételi vagy vizsgajelentkezési roham alatt a Neptun ettől függetlenül is kidobhat.
 - `Theme`: választható színkiemelés a Neptun felületén.
 
 ## Telepítés
@@ -41,6 +41,7 @@ Emiatt több intézményi Neptun-telepítésen is működhet külön build nélk
 - A tárgy- és vizsgafelismerés heurisztikus. Szokatlan helyi jelöléseknél szükség lehet finomhangolásra.
 - A felvételi műveletek szándékosan egymás után futnak. A Neptun gyakran rosszul kezeli a párhuzamos kéréseket.
 - A vizsgafunkciók az éppen megnyitott vizsgaoldalon dolgoznak. Nem járják be önállóan az összes tárgyat és vizsgaoldalt.
+- Az `Infinite Session` nem jelent biztos védelmet regisztrációs időszakban. Ha a Neptun szerveroldalon érvényteleníti a munkamenetet, azt egy userscript nem tudja megakadályozni.
 
 ## Adatkezelés
 

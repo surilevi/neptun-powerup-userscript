@@ -10,9 +10,10 @@
  *
  * JWT claims: SessionId, WebSessionType, jti, role, nbf, exp, iat, iss, aud
  *
- * Refresh behavior: Reactive on 401 → POST GetNewTokens → new access_token
- *   + extended refresh_token_expiration written to sessionStorage.
- *   Each successful refresh extends the refresh window by ~5 min (rolling).
+ * Refresh behavior: Neptun's Angular app refreshes through Account/GetNewTokens
+ *   and writes the new access_token + refresh_token_expiration to sessionStorage.
+ *   NPU observes those writes and nudges Neptun's own idle service instead of
+ *   calling the refresh endpoint directly.
  */
 
 export interface NeptunSessionStorage {
@@ -55,8 +56,11 @@ export const SESSION_STORAGE_KEYS = {
   tabId: 'tabId',
 } as const
 
-/** Access token lifetime in seconds */
+/** Observed access token lifetime in seconds. */
 export const ACCESS_TOKEN_LIFETIME_S = 300 // 5 minutes
 
-/** Refresh before expiry by this many seconds */
-export const REFRESH_BUFFER_S = 180 // refresh 3 min before expiry for safer tab-throttled keepalive
+/** Refresh access tokens when Neptun's own Angular interceptor would. */
+export const ACCESS_REFRESH_BUFFER_S = 30
+
+/** Refresh the rolling browser session when Neptun's own idle service would. */
+export const SESSION_REFRESH_BUFFER_S = 150

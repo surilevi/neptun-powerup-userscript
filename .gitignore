@@ -30,13 +30,3 @@ pnpm-debug.log*
 
 # Test coverage
 coverage/
-
-# Claude Code
-.claude/
-docs/superpowers/
-
-# Archived upstream clone/reference
-npu/
-
-# Personal notes
-note_for_me*.txt

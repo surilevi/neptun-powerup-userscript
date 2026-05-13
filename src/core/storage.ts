@@ -11,6 +11,8 @@ export interface StorageService {
   setForDomain<T>(key: string, value: T): Promise<void>
 }
 
+let writeQueue: Promise<void> = Promise.resolve()
+
 export function createStorageService(gm: GmStorage, domain: string): StorageService {
   async function loadAll(): Promise<Record<string, unknown>> {
     const raw = await gm.getValue('npu3')
@@ -31,9 +33,17 @@ export function createStorageService(gm: GmStorage, domain: string): StorageServ
     }
   }
 
-  // TODO: Read-modify-write without locking. If two set() calls run
-  // concurrently, the second write may overwrite the first's changes.
-  // Add a simple async mutex/queue if this becomes a practical problem.
+  function updateAll(mutator: (data: Record<string, unknown>) => void): Promise<void> {
+    writeQueue = writeQueue
+      .catch(() => undefined)
+      .then(async () => {
+        const data = await loadAll()
+        mutator(data)
+        await saveAll(data)
+      })
+    return writeQueue
+  }
+
   return {
     async get<T>(key: string): Promise<T | undefined> {
       const data = await loadAll()
@@ -41,15 +51,15 @@ export function createStorageService(gm: GmStorage, domain: string): StorageServ
     },
 
     async set<T>(key: string, value: T): Promise<void> {
-      const data = await loadAll()
-      data[key] = value
-      await saveAll(data)
+      await updateAll((data) => {
+        data[key] = value
+      })
     },
 
     async remove(key: string): Promise<void> {
-      const data = await loadAll()
-      delete data[key]
-      await saveAll(data)
+      await updateAll((data) => {
+        delete data[key]
+      })
     },
 
     async getForDomain<T>(key: string): Promise<T | undefined> {
@@ -59,11 +69,11 @@ export function createStorageService(gm: GmStorage, domain: string): StorageServ
     },
 
     async setForDomain<T>(key: string, value: T): Promise<void> {
-      const data = await loadAll()
-      const domainData = (data[`domain:${domain}`] ?? {}) as Record<string, unknown>
-      domainData[key] = value
-      data[`domain:${domain}`] = domainData
-      await saveAll(data)
+      await updateAll((data) => {
+        const domainData = (data[`domain:${domain}`] ?? {}) as Record<string, unknown>
+        domainData[key] = value
+        data[`domain:${domain}`] = domainData
+      })
     },
   }
 }

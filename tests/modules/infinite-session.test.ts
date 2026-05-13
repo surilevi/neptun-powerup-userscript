@@ -56,19 +56,30 @@ function createFakeJwt(exp: number): string {
   return `${header}.${payload}.${signature}`
 }
 
-function mockRefreshResponse(expOffsetSeconds = 300, refreshOffsetMinutes = 30) {
+function mockNativeRefresh(expOffsetSeconds = 300, refreshOffsetMinutes = 30) {
   const exp = Math.floor(Date.now() / 1000) + expOffsetSeconds
   const refreshExpiration = new Date(Date.now() + refreshOffsetMinutes * 60_000).toISOString()
+  const refreshAction = vi.fn()
+  let refreshed = false
+
+  const listener = () => {
+    refreshAction()
+    if (refreshed) return
+    refreshed = true
+    sessionStorage.setItem('access_token', createFakeJwt(exp))
+    sessionStorage.setItem('refresh_token_expiration', refreshExpiration)
+  }
+
+  document.addEventListener('visibilitychange', listener)
+  document.addEventListener('mousedown', listener)
 
   return {
-    ok: true,
-    status: 200,
-    text: vi.fn(async () =>
-      JSON.stringify({
-        access_token: createFakeJwt(exp),
-        refresh_token_expiration: refreshExpiration,
-      }),
-    ),
+    refreshAction,
+    refreshExpiration,
+    dispose: () => {
+      document.removeEventListener('visibilitychange', listener)
+      document.removeEventListener('mousedown', listener)
+    },
   }
 }
 
@@ -115,31 +126,30 @@ describe('infiniteSessionModule', () => {
   it('should recover an existing token from sessionStorage after module reinitialize', async () => {
     const bus = createEventBus()
     const api = createMockApi(bus)
-    const fetchMock = vi.fn().mockResolvedValue(mockRefreshResponse())
-    vi.stubGlobal('fetch', fetchMock)
+    const nativeRefresh = mockNativeRefresh(300, 35)
 
-    const existingExp = Math.floor(Date.now() / 1000) + 90
+    const existingExp = Math.floor(Date.now() / 1000) + 45
     sessionStorage.setItem('access_token', createFakeJwt(existingExp))
-    sessionStorage.setItem(
-      'refresh_token_expiration',
-      new Date(Date.now() + 30 * 60_000).toISOString(),
-    )
+    sessionStorage.setItem('refresh_token_expiration', new Date(Date.now() + 120_000).toISOString())
 
     await infiniteSessionModule.initialize(api)
     infiniteSessionModule.dispose?.()
 
     await infiniteSessionModule.initialize(api)
-    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.advanceTimersByTimeAsync(21_000)
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0][0]).toContain('Account/GetNewTokens')
+    expect(nativeRefresh.refreshAction).toHaveBeenCalled()
+    expect(sessionStorage.getItem('refresh_token_expiration')).toBe(nativeRefresh.refreshExpiration)
+
+    nativeRefresh.dispose()
   })
 
-  it('should fire refresh request when token nears expiry', async () => {
+  it('should request Neptun native refresh when session nears expiry', async () => {
     const bus = createEventBus()
     const api = createMockApi(bus)
-    const fetchMock = vi.fn().mockResolvedValue(mockRefreshResponse())
-    vi.stubGlobal('fetch', fetchMock)
+    const nativeRefresh = mockNativeRefresh(300, 35)
+    const refreshExpiresAt = Date.now() + 120_000
+    sessionStorage.setItem('refresh_token_expiration', new Date(refreshExpiresAt).toISOString())
 
     await infiniteSessionModule.initialize(api)
 
@@ -148,33 +158,23 @@ describe('infiniteSessionModule', () => {
       accessToken: 'test-token',
       refreshToken: '',
       expiresAt,
-      refreshExpiresAt: 0,
+      refreshExpiresAt,
     })
 
-    await vi.advanceTimersByTimeAsync(4 * 60 * 1000)
+    await vi.advanceTimersByTimeAsync(21_000)
 
-    expect(fetchMock).toHaveBeenCalled()
-    expect(fetchMock.mock.calls[0][0]).toContain('Account/GetNewTokens')
-    expect(fetchMock.mock.calls[0][1]).toEqual(
-      expect.objectContaining({
-        method: 'POST',
-        credentials: 'include',
-        body: '{}',
-        headers: expect.objectContaining({
-          Accept: 'application/json, text/plain, */*',
-          Authorization: expect.stringMatching(/^Bearer\s.+/),
-          'Content-Type': 'application/json',
-        }),
-      }),
-    )
+    expect(nativeRefresh.refreshAction).toHaveBeenCalled()
+    expect(sessionStorage.getItem('refresh_token_expiration')).toBe(nativeRefresh.refreshExpiration)
+
+    nativeRefresh.dispose()
   })
 
-  it('should persist refreshed tokens returned by the refresh endpoint', async () => {
+  it('should adopt tokens written by Neptun native refresh', async () => {
     const bus = createEventBus()
     const api = createMockApi(bus)
-    const response = mockRefreshResponse(600, 35)
-    const fetchMock = vi.fn().mockResolvedValue(response)
-    vi.stubGlobal('fetch', fetchMock)
+    const nativeRefresh = mockNativeRefresh(600, 35)
+    const refreshExpiresAt = Date.now() + 120_000
+    sessionStorage.setItem('refresh_token_expiration', new Date(refreshExpiresAt).toISOString())
 
     await infiniteSessionModule.initialize(api)
 
@@ -182,21 +182,22 @@ describe('infiniteSessionModule', () => {
       accessToken: 'test-token',
       refreshToken: '',
       expiresAt: Date.now() + 5 * 60 * 1000,
-      refreshExpiresAt: 0,
+      refreshExpiresAt,
     })
 
-    await vi.advanceTimersByTimeAsync(4 * 60 * 1000)
+    await vi.advanceTimersByTimeAsync(21_000)
 
     expect(sessionStorage.getItem('access_token')).toMatch(/\./)
-    expect(sessionStorage.getItem('refresh_token_expiration')).toBeTruthy()
-    expect(response.text).toHaveBeenCalledOnce()
+    expect(sessionStorage.getItem('refresh_token_expiration')).toBe(nativeRefresh.refreshExpiration)
+
+    nativeRefresh.dispose()
   })
 
   it('should not fire refresh request when token is still fresh', async () => {
     const bus = createEventBus()
     const api = createMockApi(bus)
-    const fetchMock = vi.fn().mockResolvedValue(mockRefreshResponse())
-    vi.stubGlobal('fetch', fetchMock)
+    const nativeSignal = vi.fn()
+    document.addEventListener('mousedown', nativeSignal)
 
     await infiniteSessionModule.initialize(api)
 
@@ -209,29 +210,101 @@ describe('infiniteSessionModule', () => {
 
     vi.advanceTimersByTime(30_000)
 
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(nativeSignal).not.toHaveBeenCalled()
+    document.removeEventListener('mousedown', nativeSignal)
   })
 
-  it('should skip keepalive when one is already in flight', async () => {
+  it('should send a periodic native activity pulse', async () => {
     const bus = createEventBus()
     const api = createMockApi(bus)
-    const fetchMock = vi.fn().mockReturnValue(new Promise(() => {}))
-    vi.stubGlobal('fetch', fetchMock)
+    const nativeSignal = vi.fn()
+    document.addEventListener('mousedown', nativeSignal)
 
     await infiniteSessionModule.initialize(api)
 
     bus.emit('token:acquired', {
       accessToken: 'test-token',
       refreshToken: '',
-      expiresAt: Date.now() + 90 * 1000,
-      refreshExpiresAt: 0,
+      expiresAt: Date.now() + 30 * 60 * 1000,
+      refreshExpiresAt: Date.now() + 30 * 60 * 1000,
     })
 
-    vi.advanceTimersByTime(30_000)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(4 * 60_000 - 1)
+    expect(nativeSignal).not.toHaveBeenCalled()
 
-    vi.advanceTimersByTime(30_000)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(nativeSignal).toHaveBeenCalledTimes(1)
+
+    document.removeEventListener('mousedown', nativeSignal)
+  })
+
+  it('should warn that registration rush keep-alive is best-effort', async () => {
+    const bus = createEventBus()
+    const api = createMockApi(bus)
+    window.history.replaceState({}, '', '/hallgatoi/subjects/registration')
+
+    await infiniteSessionModule.initialize(api)
+
+    expect(api.statusPanel.addMessage).toHaveBeenCalledWith(
+      'warn',
+      expect.stringContaining('best-effort'),
+    )
+  })
+
+  it('should emit expired and skip native activity when the stored token disappears', async () => {
+    const bus = createEventBus()
+    const api = createMockApi(bus)
+    const expiredHandler = vi.fn()
+    const nativeSignal = vi.fn()
+    bus.on('token:expired', expiredHandler)
+    document.addEventListener('mousedown', nativeSignal)
+
+    await infiniteSessionModule.initialize(api)
+
+    bus.emit('token:acquired', {
+      accessToken: 'test-token',
+      refreshToken: '',
+      expiresAt: Date.now() + 30 * 60 * 1000,
+      refreshExpiresAt: Date.now() + 30 * 60 * 1000,
+    })
+    sessionStorage.removeItem('access_token')
+
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(expiredHandler).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(4 * 60_000)
+    expect(nativeSignal).not.toHaveBeenCalled()
+
+    document.removeEventListener('mousedown', nativeSignal)
+  })
+
+  it('should skip keepalive when one is already in flight', async () => {
+    const bus = createEventBus()
+    const api = createMockApi(bus)
+    const refreshExpiresAt = Date.now() + 120_000
+    sessionStorage.setItem('refresh_token_expiration', new Date(refreshExpiresAt).toISOString())
+
+    await infiniteSessionModule.initialize(api)
+
+    bus.emit('token:acquired', {
+      accessToken: 'test-token',
+      refreshToken: '',
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      refreshExpiresAt,
+    })
+
+    vi.advanceTimersByTime(15_000)
+    expect(api.statusPanel.setSessionStatus).toHaveBeenCalledWith('refreshing')
+    const refreshingCalls = () =>
+      vi
+        .mocked(api.statusPanel.setSessionStatus)
+        .mock.calls.filter(([state]) => state === 'refreshing').length
+    expect(refreshingCalls()).toBe(1)
+
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    expect(refreshingCalls()).toBe(1)
   })
 
   it('should emit token:expiring before refresh request', async () => {
@@ -239,9 +312,9 @@ describe('infiniteSessionModule', () => {
     const api = createMockApi(bus)
     const expiringHandler = vi.fn()
     bus.on('token:expiring', expiringHandler)
-
-    const fetchMock = vi.fn().mockResolvedValue(mockRefreshResponse())
-    vi.stubGlobal('fetch', fetchMock)
+    const nativeRefresh = mockNativeRefresh()
+    const refreshExpiresAt = Date.now() + 120_000
+    sessionStorage.setItem('refresh_token_expiration', new Date(refreshExpiresAt).toISOString())
 
     await infiniteSessionModule.initialize(api)
 
@@ -250,12 +323,16 @@ describe('infiniteSessionModule', () => {
       accessToken: 'test-token',
       refreshToken: 'test-refresh',
       expiresAt,
-      refreshExpiresAt: 0,
+      refreshExpiresAt,
     })
 
-    await vi.advanceTimersByTimeAsync(4 * 60 * 1000)
+    await vi.advanceTimersByTimeAsync(15_000)
 
-    expect(expiringHandler).toHaveBeenCalledWith(expect.objectContaining({ expiresAt }))
+    expect(expiringHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ expiresAt: refreshExpiresAt }),
+    )
+
+    nativeRefresh.dispose()
   })
 
   it('should keep a single watchdog on new token', async () => {
@@ -287,8 +364,7 @@ describe('infiniteSessionModule', () => {
   it('should use new expiry after second token:acquired', async () => {
     const bus = createEventBus()
     const api = createMockApi(bus)
-    const fetchMock = vi.fn().mockResolvedValue(mockRefreshResponse())
-    vi.stubGlobal('fetch', fetchMock)
+    const nativeRefresh = mockNativeRefresh()
 
     await infiniteSessionModule.initialize(api)
 
@@ -300,7 +376,7 @@ describe('infiniteSessionModule', () => {
     })
 
     vi.advanceTimersByTime(30_000)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(nativeRefresh.refreshAction).not.toHaveBeenCalled()
 
     bus.emit('token:acquired', {
       accessToken: 'token-2',
@@ -309,15 +385,14 @@ describe('infiniteSessionModule', () => {
       refreshExpiresAt: 0,
     })
 
-    await vi.advanceTimersByTimeAsync(15_000)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(90_000)
+    expect(nativeRefresh.refreshAction).toHaveBeenCalled()
+    nativeRefresh.dispose()
   })
 
   it('should respect keepAliveInFlight in visibility change handler', async () => {
     const bus = createEventBus()
     const api = createMockApi(bus)
-    const fetchMock = vi.fn().mockReturnValue(new Promise(() => {}))
-    vi.stubGlobal('fetch', fetchMock)
 
     await infiniteSessionModule.initialize(api)
 
@@ -328,13 +403,18 @@ describe('infiniteSessionModule', () => {
       refreshExpiresAt: 0,
     })
 
-    vi.advanceTimersByTime(30_000)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(60_000)
+    expect(api.statusPanel.setSessionStatus).toHaveBeenCalledWith('refreshing')
+    const refreshingCalls = () =>
+      vi
+        .mocked(api.statusPanel.setSessionStatus)
+        .mock.calls.filter(([state]) => state === 'refreshing').length
+    expect(refreshingCalls()).toBe(1)
 
     Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
     document.dispatchEvent(new Event('visibilitychange'))
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(refreshingCalls()).toBe(1)
   })
 
   it('should dismiss accented Hungarian session timeout dialogs', async () => {
@@ -388,9 +468,6 @@ describe('infiniteSessionModule', () => {
     const expiredHandler = vi.fn()
     bus.on('token:expired', expiredHandler)
 
-    const fetchMock = vi.fn().mockRejectedValue(new Error('network error'))
-    vi.stubGlobal('fetch', fetchMock)
-
     await infiniteSessionModule.initialize(api)
 
     bus.emit('token:acquired', {
@@ -400,7 +477,7 @@ describe('infiniteSessionModule', () => {
       refreshExpiresAt: 0,
     })
 
-    await vi.advanceTimersByTimeAsync(4 * 60 * 1000)
+    await vi.advanceTimersByTimeAsync(4 * 60 * 1000 + 36_000)
 
     expect(expiredHandler).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBeGreaterThanOrEqual(2)
@@ -411,9 +488,6 @@ describe('infiniteSessionModule', () => {
     const api = createMockApi(bus)
     const expiredHandler = vi.fn()
     bus.on('token:expired', expiredHandler)
-
-    const fetchMock = vi.fn().mockRejectedValue(new Error('network error'))
-    vi.stubGlobal('fetch', fetchMock)
 
     await infiniteSessionModule.initialize(api)
 
@@ -429,5 +503,126 @@ describe('infiniteSessionModule', () => {
 
     await vi.advanceTimersByTimeAsync(2 * 60 * 1000)
     expect(expiredHandler).toHaveBeenCalled()
+  })
+
+  it('should not refresh access token alone when session expiry is still valid', async () => {
+    const bus = createEventBus()
+    const api = createMockApi(bus)
+    const expiredHandler = vi.fn()
+    bus.on('token:expired', expiredHandler)
+    const nativeSignal = vi.fn()
+    document.addEventListener('mousedown', nativeSignal)
+
+    sessionStorage.setItem(
+      'refresh_token_expiration',
+      new Date(Date.now() + 30 * 60_000).toISOString(),
+    )
+
+    await infiniteSessionModule.initialize(api)
+
+    bus.emit('token:acquired', {
+      accessToken: 'test-token',
+      refreshToken: '',
+      expiresAt: Date.now() + 10 * 1000,
+      refreshExpiresAt: Date.now() + 30 * 60_000,
+    })
+
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(nativeSignal).not.toHaveBeenCalled()
+    expect(expiredHandler).not.toHaveBeenCalled()
+    document.removeEventListener('mousedown', nativeSignal)
+  })
+
+  it('should emit token:expired when refresh session is expired even if access token is fresh', async () => {
+    const bus = createEventBus()
+    const api = createMockApi(bus)
+    const expiredHandler = vi.fn()
+    bus.on('token:expired', expiredHandler)
+    const nativeSignal = vi.fn()
+    document.addEventListener('mousedown', nativeSignal)
+
+    const expiredRefreshAt = Date.now() - 1000
+    sessionStorage.setItem('refresh_token_expiration', new Date(expiredRefreshAt).toISOString())
+
+    await infiniteSessionModule.initialize(api)
+
+    bus.emit('token:acquired', {
+      accessToken: 'test-token',
+      refreshToken: '',
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      refreshExpiresAt: expiredRefreshAt,
+    })
+
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(expiredHandler).toHaveBeenCalledTimes(1)
+    expect(nativeSignal).not.toHaveBeenCalled()
+    document.removeEventListener('mousedown', nativeSignal)
+  })
+
+  it('should emit token:acquired after native refresh writes tokens', async () => {
+    const bus = createEventBus()
+    const api = createMockApi(bus)
+    const acquiredHandler = vi.fn()
+    bus.on('token:acquired', acquiredHandler)
+    const nativeRefresh = mockNativeRefresh(600, 35)
+    const refreshExpiresAt = Date.now() + 120_000
+    sessionStorage.setItem('refresh_token_expiration', new Date(refreshExpiresAt).toISOString())
+
+    await infiniteSessionModule.initialize(api)
+
+    bus.emit('token:acquired', {
+      accessToken: 'test-token',
+      refreshToken: '',
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      refreshExpiresAt,
+    })
+
+    await vi.advanceTimersByTimeAsync(21_000)
+
+    expect(acquiredHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: expect.stringMatching(/\./),
+        refreshExpiresAt: Date.parse(nativeRefresh.refreshExpiration),
+      }),
+    )
+    nativeRefresh.dispose()
+  })
+
+  it('should not emit duplicate token:acquired when the token watcher observes native refresh first', async () => {
+    const bus = createEventBus()
+    const api = createMockApi(bus)
+    const acquiredHandler = vi.fn()
+    bus.on('token:acquired', acquiredHandler)
+    const nativeRefresh = mockNativeRefresh(600, 35)
+    const refreshExpiresAt = Date.now() + 120_000
+    sessionStorage.setItem('refresh_token_expiration', new Date(refreshExpiresAt).toISOString())
+
+    await infiniteSessionModule.initialize(api)
+
+    bus.emit('token:acquired', {
+      accessToken: 'test-token',
+      refreshToken: '',
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      refreshExpiresAt,
+    })
+
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    const refreshedAccessToken = sessionStorage.getItem('access_token')
+    expect(refreshedAccessToken).toMatch(/\./)
+
+    bus.emit('token:acquired', {
+      accessToken: refreshedAccessToken!,
+      refreshToken: nativeRefresh.refreshExpiration,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      refreshExpiresAt: Date.parse(nativeRefresh.refreshExpiration),
+    })
+
+    await vi.advanceTimersByTimeAsync(6_000)
+
+    expect(acquiredHandler).toHaveBeenCalledTimes(2)
+    nativeRefresh.dispose()
   })
 })

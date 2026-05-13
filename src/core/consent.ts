@@ -81,7 +81,10 @@ export function showConsentDialog(version: string): Promise<boolean> {
       'font-size: 12px; color: #ccc; line-height: 1.8; padding-left: 18px; margin: 0 0 16px 0;'
 
     const bullets: Array<{ bold: string; rest: string }> = [
-      { bold: 'Keeps the session alive', rest: ' by refreshing active Neptun tokens' },
+      {
+        bold: 'Session keep-alive is best-effort',
+        rest: '; Neptun may still force logout during course or exam rushes',
+      },
       { bold: 'Clicks course controls', rest: ' when you ask it to enroll saved selections' },
       { bold: 'Clicks exam controls', rest: ' when you ask it to enroll saved exam dates' },
       { bold: 'May conflict with rules', rest: ' at your university or faculty' },

@@ -96,6 +96,7 @@
       error: (...args) => console.error(prefix, ...args)
     };
   }
+  let writeQueue = Promise.resolve();
   function createStorageService(gm, domain) {
     async function loadAll() {
       const raw = await gm.getValue("npu3");
@@ -114,20 +115,28 @@
         console.error("[NPU:storage] failed to save data:", err);
       }
     }
+    function updateAll(mutator) {
+      writeQueue = writeQueue.catch(() => void 0).then(async () => {
+        const data = await loadAll();
+        mutator(data);
+        await saveAll(data);
+      });
+      return writeQueue;
+    }
     return {
       async get(key) {
         const data = await loadAll();
         return data[key];
       },
       async set(key, value) {
-        const data = await loadAll();
-        data[key] = value;
-        await saveAll(data);
+        await updateAll((data) => {
+          data[key] = value;
+        });
       },
       async remove(key) {
-        const data = await loadAll();
-        delete data[key];
-        await saveAll(data);
+        await updateAll((data) => {
+          delete data[key];
+        });
       },
       async getForDomain(key) {
         const data = await loadAll();
@@ -135,11 +144,11 @@
         return domainData[key];
       },
       async setForDomain(key, value) {
-        const data = await loadAll();
-        const domainData = data[`domain:${domain}`] ?? {};
-        domainData[key] = value;
-        data[`domain:${domain}`] = domainData;
-        await saveAll(data);
+        await updateAll((data) => {
+          const domainData = data[`domain:${domain}`] ?? {};
+          domainData[key] = value;
+          data[`domain:${domain}`] = domainData;
+        });
       }
     };
   }
@@ -572,6 +581,7 @@ case "error":
       color: ${COLORS.textMuted};
     `;
       sessionLine.textContent = "Session: waiting for token...";
+      sessionLine.title = "Session keep-alive is best-effort. Neptun may still force logout during course or exam registration rushes.";
       sessionSection.appendChild(sessionLine);
       const rushSection = document.createElement("div");
       rushSection.style.cssText = `
@@ -634,7 +644,7 @@ case "error":
       rushSection.appendChild(styleEl);
       const courseLabel = document.createElement("label");
       courseLabel.className = "npu-rush-toggle";
-      courseLabel.title = "After login, open course registration and enroll saved courses";
+      courseLabel.title = "After login, open course registration and enroll saved courses. Session keep-alive is not guaranteed during registration rushes.";
       courseRushToggle = document.createElement("input");
       courseRushToggle.type = "checkbox";
       courseRushToggle.checked = courseRushOn;
@@ -653,7 +663,7 @@ case "error":
       rushSection.appendChild(courseLabel);
       const examLabel = document.createElement("label");
       examLabel.className = "npu-rush-toggle";
-      examLabel.title = "After login, open exams and enroll saved dates";
+      examLabel.title = "After login, open exams and enroll saved dates. Session keep-alive is not guaranteed during registration rushes.";
       examRushToggle = document.createElement("input");
       examRushToggle.type = "checkbox";
       examRushToggle.checked = examRushOn;
@@ -1098,7 +1108,6 @@ case "error":
     };
   }
   const KNOWN_ENDPOINTS = {
-    getNewTokens: "Account/GetNewTokens",
 schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   };
   const SESSION_STORAGE_KEYS = {
@@ -1107,7 +1116,8 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     loginType: "login_type",
     tabId: "tabId"
   };
-  const REFRESH_BUFFER_S = 180;
+  const ACCESS_REFRESH_BUFFER_S = 30;
+  const SESSION_REFRESH_BUFFER_S = 150;
   const POLL_INTERVAL_MS = 2e3;
   function decodeJwt(token) {
     try {
@@ -1296,25 +1306,33 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       window.removeEventListener("popstate", checkAndEmit);
     };
   }
-  function getRefreshTokenRemaining() {
+  function getStoredRefreshExpiresAt() {
     try {
       const expStr = sessionStorage.getItem(SESSION_STORAGE_KEYS.refreshTokenExpiration);
-      if (!expStr) return -1;
+      if (!expStr) return 0;
       const expMs = Date.parse(expStr);
-      if (!Number.isFinite(expMs)) return -1;
-      return expMs - Date.now();
+      return Number.isFinite(expMs) ? expMs : 0;
     } catch {
-      return -1;
+      return 0;
     }
   }
-  const REFRESH_BUFFER_MS = REFRESH_BUFFER_S * 1e3;
+  function formatRemaining(ms) {
+    return Number.isFinite(ms) && ms >= 0 ? `${Math.round(ms / 1e3)}s` : "unknown";
+  }
+  const ACCESS_REFRESH_BUFFER_MS = ACCESS_REFRESH_BUFFER_S * 1e3;
+  const SESSION_REFRESH_BUFFER_MS = SESSION_REFRESH_BUFFER_S * 1e3;
   const WATCHDOG_INTERVAL_MS = 15e3;
+  const ACTIVITY_PULSE_INTERVAL_MS = 4 * 6e4;
+  const NATIVE_REFRESH_SETTLE_MS = 6e3;
+  const FALLBACK_RETRY_MS = 1e4;
   let watchdogTimer = null;
+  let activityPulseTimer = null;
   let fallbackRetryTimer = null;
+  let nativeRefreshSettleTimer = null;
   let keepAliveInFlight = false;
-  let activeAbortController = null;
-  let abortTimeoutId = null;
   let currentExpiresAt = 0;
+  let currentRefreshExpiresAt = 0;
+  let sessionExpiredEmitted = false;
   let api$2 = null;
   let unsubscribe = null;
   let visibilityHandler = null;
@@ -1348,29 +1366,113 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       return null;
     }
   }
-  function getApiPathPrefix() {
-    const pathSegments = window.location.pathname.split("/");
-    return pathSegments.length >= 2 ? `/${pathSegments[1]}` : "";
+  function getRefreshExpiresAt() {
+    const storedRefreshExpiresAt = getStoredRefreshExpiresAt();
+    if (storedRefreshExpiresAt > 0) {
+      currentRefreshExpiresAt = storedRefreshExpiresAt;
+    }
+    return currentRefreshExpiresAt;
   }
-  function persistRefreshedTokens(bodyText) {
-    if (!bodyText.trim()) return false;
+  function getSessionRemaining() {
+    const refreshExpiresAt = getRefreshExpiresAt();
+    return refreshExpiresAt > 0 ? refreshExpiresAt - Date.now() : -1;
+  }
+  function getRefreshDecision(now = Date.now()) {
+    const accessRemainingMs = currentExpiresAt > 0 ? currentExpiresAt - now : -1;
+    const refreshExpiresAt = getRefreshExpiresAt();
+    const sessionRemainingMs = refreshExpiresAt > 0 ? refreshExpiresAt - now : -1;
+    if (sessionRemainingMs >= 0) {
+      if (sessionRemainingMs <= SESSION_REFRESH_BUFFER_MS) {
+        return {
+          shouldRefresh: true,
+          reason: "session-timeout",
+          accessRemainingMs,
+          sessionRemainingMs
+        };
+      }
+      return {
+        shouldRefresh: false,
+        reason: null,
+        accessRemainingMs,
+        sessionRemainingMs
+      };
+    }
+    if (currentExpiresAt > 0 && accessRemainingMs <= ACCESS_REFRESH_BUFFER_MS) {
+      return {
+        shouldRefresh: true,
+        reason: "access-token",
+        accessRemainingMs,
+        sessionRemainingMs
+      };
+    }
+    return {
+      shouldRefresh: false,
+      reason: null,
+      accessRemainingMs,
+      sessionRemainingMs
+    };
+  }
+  function restoreSessionStatusAfterRefreshFailure() {
+    if (!api$2) return;
+    const sessionRemaining = getSessionRemaining();
+    if (sessionRemaining > 0) {
+      api$2.statusPanel.setSessionStatus(
+        sessionRemaining <= SESSION_REFRESH_BUFFER_MS ? "expiring" : "active",
+        sessionRemaining
+      );
+      return;
+    }
+    const accessRemaining = currentExpiresAt - Date.now();
+    if (currentRefreshExpiresAt <= 0 && accessRemaining > 0) {
+      api$2.statusPanel.setSessionStatus(
+        accessRemaining <= ACCESS_REFRESH_BUFFER_MS ? "expiring" : "active",
+        accessRemaining
+      );
+      return;
+    }
+    emitTokenExpired();
+  }
+  function emitTokenExpired() {
+    if (sessionExpiredEmitted) return;
+    sessionExpiredEmitted = true;
+    api$2?.bus.emit("token:expired", {});
+  }
+  function getStoredAccessToken() {
     try {
-      const data = JSON.parse(bodyText);
-      const accessToken = data.access_token ?? data.accessToken;
-      const refreshTokenExpiration = data.refresh_token_expiration ?? data.refreshTokenExpiration;
-      if (!accessToken) return false;
-      sessionStorage.setItem(SESSION_STORAGE_KEYS.accessToken, accessToken);
-      if (refreshTokenExpiration) {
-        sessionStorage.setItem(SESSION_STORAGE_KEYS.refreshTokenExpiration, refreshTokenExpiration);
+      return sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken);
+    } catch {
+      return null;
+    }
+  }
+  function hasStoredAccessToken() {
+    if (getStoredAccessToken()) return true;
+    if (!sessionExpiredEmitted) {
+      api$2?.logger.warn("[session-debug] access token missing from sessionStorage, session lost");
+    }
+    emitTokenExpired();
+    return false;
+  }
+  function dispatchNeptunActivityEvent() {
+    const target = document.querySelector(".footer__version") ?? document.querySelector("app-footer") ?? document.body ?? document.documentElement ?? document;
+    const activityEvent = typeof window.MouseEvent === "function" ? new window.MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true
+    }) : new window.Event("mousedown", { bubbles: true, cancelable: true });
+    target.dispatchEvent(activityEvent);
+  }
+  function requestNeptunNativeRefresh() {
+    if (document.visibilityState === "visible") {
+      try {
+        const visibilityEvent = typeof window.Event === "function" ? new window.Event("visibilitychange") : new Event("visibilitychange");
+        document.dispatchEvent(visibilityEvent);
+      } catch (err) {
+        api$2?.logger.warn("[session-debug] failed to dispatch Neptun visibility refresh:", err);
       }
-      const jwt = decodeJwt(accessToken);
-      if (jwt) {
-        currentExpiresAt = jwt.exp * 1e3;
-      }
-      return true;
+    }
+    try {
+      dispatchNeptunActivityEvent();
     } catch (err) {
-      api$2?.logger.warn("failed to parse refresh response JSON:", err);
-      return false;
+      api$2?.logger.warn("[session-debug] failed to dispatch Neptun activity refresh:", err);
     }
   }
   function stopWatchdog() {
@@ -1378,9 +1480,17 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       clearInterval(watchdogTimer);
       watchdogTimer = null;
     }
+    if (activityPulseTimer !== null) {
+      clearInterval(activityPulseTimer);
+      activityPulseTimer = null;
+    }
     if (fallbackRetryTimer !== null) {
       clearTimeout(fallbackRetryTimer);
       fallbackRetryTimer = null;
+    }
+    if (nativeRefreshSettleTimer !== null) {
+      clearTimeout(nativeRefreshSettleTimer);
+      nativeRefreshSettleTimer = null;
     }
   }
   function startWatchdog() {
@@ -1389,119 +1499,115 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     watchdogTimer = setInterval(() => {
       if (!currentExpiresAt || !api$2) return;
       if (keepAliveInFlight) return;
-      const remainingMs = currentExpiresAt - Date.now();
+      if (!hasStoredAccessToken()) return;
+      const decision = getRefreshDecision();
       api$2.logger.info(
-        `[session-debug] watchdog tick: ${Math.round(remainingMs / 1e3)}s remaining, buffer=${REFRESH_BUFFER_S}s`
+        `[session-debug] watchdog tick: access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}, accessBuffer=${ACCESS_REFRESH_BUFFER_S}s, sessionBuffer=${SESSION_REFRESH_BUFFER_S}s`
       );
-      if (Date.now() >= currentExpiresAt - REFRESH_BUFFER_MS) {
-        api$2.logger.info("[session-debug] watchdog tick: token is inside refresh buffer");
-        triggerKeepAlive();
+      if (currentRefreshExpiresAt > 0 && decision.sessionRemainingMs <= 0) {
+        api$2.logger.warn("[session-debug] refresh token expired, session lost");
+        emitTokenExpired();
+        return;
+      }
+      if (decision.shouldRefresh && decision.reason) {
+        api$2.logger.info(`[session-debug] watchdog tick: ${decision.reason} is inside refresh buffer`);
+        triggerKeepAlive(decision.reason);
       } else {
         api$2.logger.info("[session-debug] watchdog tick: token still fresh, skipping refresh");
       }
     }, WATCHDOG_INTERVAL_MS);
   }
-  function triggerKeepAlive() {
-    if (!api$2) return;
-    if (keepAliveInFlight) return;
-    let accessToken;
-    try {
-      accessToken = sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken);
-    } catch {
-      accessToken = null;
-    }
-    if (!accessToken) {
-      api$2.logger.warn("[session-debug] cannot refresh session: no access token in sessionStorage");
+  function startActivityPulse() {
+    if (activityPulseTimer !== null) return;
+    api$2?.logger.info("[session-debug] startActivityPulse: starting 4m native activity interval");
+    activityPulseTimer = setInterval(() => {
+      if (!currentExpiresAt || !api$2) return;
+      if (keepAliveInFlight) return;
+      if (!hasStoredAccessToken()) return;
+      const decision = getRefreshDecision();
+      if (currentRefreshExpiresAt > 0 && decision.sessionRemainingMs <= 0) {
+        api$2.logger.warn("[session-debug] activity pulse skipped because refresh token is expired");
+        emitTokenExpired();
+        return;
+      }
+      api$2.logger.info(
+        `[session-debug] activity pulse: access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}`
+      );
+      requestNeptunNativeRefresh();
+    }, ACTIVITY_PULSE_INTERVAL_MS);
+  }
+  function warnRegistrationRushLimit() {
+    const path = window.location.pathname.toLowerCase();
+    if (!path.includes("/subjects/registration") && !path.includes("/exams/overview/registration")) {
       return;
     }
-    keepAliveInFlight = true;
-    const remainingMs = Math.max(0, currentExpiresAt - Date.now());
-    api$2.statusPanel.setSessionStatus("refreshing");
-    api$2.bus.emit("token:expiring", {
-      expiresAt: currentExpiresAt,
-      remainingMs
-    });
-    api$2.logger.info(
-      `[session-debug] firing session refresh request with ${Math.round(remainingMs / 1e3)}s left on access token`
+    api$2?.statusPanel.addMessage(
+      "warn",
+      "Session keep-alive is best-effort; Neptun may still force logout during registration rushes."
     );
-    const refreshUrl = `${getApiPathPrefix()}/api/${KNOWN_ENDPOINTS.getNewTokens}`;
-    activeAbortController = new AbortController();
-    abortTimeoutId = setTimeout(() => activeAbortController?.abort(), 1e4);
-    fetch(refreshUrl, {
-      method: "POST",
-      credentials: "include",
-      body: "{}",
-      signal: activeAbortController.signal,
-      headers: {
-        Accept: "application/json, text/plain, */*",
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      }
-    }).then(async (response) => {
-      if (abortTimeoutId !== null) {
-        clearTimeout(abortTimeoutId);
-        abortTimeoutId = null;
-      }
-      activeAbortController = null;
-      try {
-        if (response.ok) {
-          api$2?.logger.info("[session-debug] refresh request returned 200 OK");
-          const bodyText = await response.text();
-          const persisted = persistRefreshedTokens(bodyText);
-          if (persisted) {
-            api$2?.logger.info("session refresh succeeded");
-          } else {
-            api$2?.logger.warn("session refresh succeeded but returned no token payload");
-          }
-        } else if (response.status === 401 || response.status === 403) {
-          api$2?.logger.warn(`[session-debug] refresh request returned auth error ${response.status}`);
-          const refreshRemaining = getRefreshTokenRemaining();
-          if (refreshRemaining > 0) {
-            api$2?.logger.warn(
-              `refresh endpoint was rejected while refresh token still looks valid (${Math.round(refreshRemaining / 1e3)}s left)`
-            );
-          } else {
-            api$2?.logger.warn("session refresh was rejected and refresh token expired, session lost");
-            api$2?.bus.emit("token:expired", {});
-          }
-        } else {
-          api$2?.logger.warn(
-            `[session-debug] refresh request returned unexpected status ${response.status}`
-          );
-          api$2?.logger.warn(`session refresh returned unexpected status: ${response.status}`);
-        }
-      } finally {
+  }
+  function triggerKeepAlive(reason = "access-token") {
+    if (!api$2) return;
+    if (keepAliveInFlight) return;
+    const previousAccessToken = getStoredAccessToken();
+    if (!previousAccessToken) {
+      api$2.logger.warn("[session-debug] cannot refresh session: no access token in sessionStorage");
+      emitTokenExpired();
+      return;
+    }
+    const previousRefreshExpiresAt = getRefreshExpiresAt();
+    keepAliveInFlight = true;
+    const accessRemainingMs = Math.max(0, currentExpiresAt - Date.now());
+    const sessionRemainingMs = getSessionRemaining();
+    const visibleRemainingMs = sessionRemainingMs >= 0 ? sessionRemainingMs : accessRemainingMs;
+    api$2.bus.emit("token:expiring", {
+      expiresAt: currentRefreshExpiresAt || currentExpiresAt,
+      remainingMs: visibleRemainingMs
+    });
+    api$2.statusPanel.setSessionStatus("refreshing");
+    api$2.logger.info(
+      `[session-debug] requesting native Neptun refresh (${reason}) with access=${formatRemaining(accessRemainingMs)}, session=${formatRemaining(sessionRemainingMs)}`
+    );
+    requestNeptunNativeRefresh();
+    nativeRefreshSettleTimer = setTimeout(() => {
+      nativeRefreshSettleTimer = null;
+      const payload = getExistingTokenPayload();
+      const latestAccessToken = getStoredAccessToken();
+      const latestRefreshExpiresAt = getRefreshExpiresAt();
+      if (payload && (latestAccessToken !== previousAccessToken || latestRefreshExpiresAt > previousRefreshExpiresAt)) {
         keepAliveInFlight = false;
+        api$2?.logger.info("[session-debug] native Neptun refresh succeeded");
+        api$2?.bus.emit("token:acquired", payload);
+        return;
       }
-    }).catch((err) => {
-      if (abortTimeoutId !== null) {
-        clearTimeout(abortTimeoutId);
-        abortTimeoutId = null;
-      }
-      activeAbortController = null;
       keepAliveInFlight = false;
       if (!api$2) return;
-      api$2.logger.warn("session refresh request failed:", err);
-      if (Date.now() >= currentExpiresAt) {
-        api$2.logger.warn("token has expired and session refresh failed, session lost");
-        api$2.bus.emit("token:expired", {});
+      api$2.logger.warn("[session-debug] native Neptun refresh did not update stored tokens");
+      const sessionRemaining = getSessionRemaining();
+      const accessRemaining = currentExpiresAt - Date.now();
+      const retryWindowRemaining = sessionRemaining > 0 ? sessionRemaining : accessRemaining;
+      if (currentRefreshExpiresAt > 0 && sessionRemaining <= 0) {
+        api$2.logger.warn("refresh token expired and native session refresh failed, session lost");
+        emitTokenExpired();
+      } else if (currentRefreshExpiresAt <= 0 && accessRemaining <= 0) {
+        api$2.logger.warn("token has expired and native session refresh failed, session lost");
+        emitTokenExpired();
       } else {
-        const remaining = currentExpiresAt - Date.now();
-        if (remaining > 15e3) {
-          api$2.logger.info("token still valid, scheduling 10s fallback retry");
-          api$2.statusPanel.setSessionStatus("refreshing");
+        restoreSessionStatusAfterRefreshFailure();
+        if (retryWindowRemaining > 15e3) {
+          api$2.logger.info("session still valid, scheduling native refresh retry");
           if (fallbackRetryTimer !== null) clearTimeout(fallbackRetryTimer);
           fallbackRetryTimer = setTimeout(() => {
             fallbackRetryTimer = null;
-            triggerKeepAlive();
-          }, 1e4);
+            triggerKeepAlive(reason);
+          }, FALLBACK_RETRY_MS);
         } else {
           api$2.logger.info(
-            `token has only ${Math.round(remaining / 1e3)}s left, watchdog will handle`
+            `refresh window has only ${Math.round(retryWindowRemaining / 1e3)}s left, watchdog will handle`
           );
         }
       }
-    });
+    }, NATIVE_REFRESH_SETTLE_MS);
   }
   function onTokenAcquired(payload) {
     if (!Number.isFinite(payload.expiresAt)) {
@@ -1509,6 +1615,8 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       return;
     }
     currentExpiresAt = payload.expiresAt;
+    currentRefreshExpiresAt = payload.refreshExpiresAt || getStoredRefreshExpiresAt() || currentRefreshExpiresAt;
+    sessionExpiredEmitted = false;
     api$2?.logger.info(
       `[session-debug] token acquired: access expires in ${Math.round((payload.expiresAt - Date.now()) / 1e3)}s, refresh expires in ${payload.refreshExpiresAt ? Math.round((payload.refreshExpiresAt - Date.now()) / 1e3) : "unknown"}s`
     );
@@ -1517,7 +1625,14 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       fallbackRetryTimer = null;
       api$2?.logger.info("[session-debug] cleared pending fallback retry after token update");
     }
+    if (keepAliveInFlight && nativeRefreshSettleTimer !== null) {
+      clearTimeout(nativeRefreshSettleTimer);
+      nativeRefreshSettleTimer = null;
+      keepAliveInFlight = false;
+      api$2?.logger.info("[session-debug] native refresh observed by token watcher");
+    }
     startWatchdog();
+    startActivityPulse();
   }
   function hydrateFromSessionStorage() {
     const payload = getExistingTokenPayload();
@@ -1536,15 +1651,15 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       if (document.visibilityState !== "visible") return;
       if (!currentExpiresAt || !api$2) return;
       if (keepAliveInFlight) return;
-      const remaining = currentExpiresAt - Date.now();
+      const decision = getRefreshDecision();
       api$2.logger.info(
-        `[session-debug] onVisibilityChange: tab visible, remaining=${Math.round(remaining / 1e3)}s, buffer=${REFRESH_BUFFER_S}s`
+        `[session-debug] onVisibilityChange: tab visible, access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}, accessBuffer=${ACCESS_REFRESH_BUFFER_S}s, sessionBuffer=${SESSION_REFRESH_BUFFER_S}s`
       );
-      if (remaining <= REFRESH_BUFFER_MS) {
+      if (decision.shouldRefresh && decision.reason) {
         api$2.logger.info(
-          "[session-debug] onVisibilityChange: token near expiry, triggering keep-alive immediately"
+          `[session-debug] onVisibilityChange: ${decision.reason} near expiry, triggering keep-alive immediately`
         );
-        triggerKeepAlive();
+        triggerKeepAlive(decision.reason);
       }
     } catch (err) {
       api$2?.logger.error("error in visibility change handler:", err);
@@ -1577,7 +1692,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   const infiniteSessionModule = {
     id: "infinite-session",
     name: "Infinite Session",
-    description: "Keeps the current Neptun session alive when possible",
+    description: "Best-effort session keep-alive for normal use; Neptun can still force logout during registration rushes",
     shouldActivate(_context) {
       return true;
     },
@@ -1588,16 +1703,11 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       document.addEventListener("visibilitychange", visibilityHandler);
       suppressSessionTimeoutModals();
       hydrateFromSessionStorage();
+      warnRegistrationRushLimit();
       api$2.logger.info("initialized, waiting for token from sessionStorage watcher");
     },
     dispose() {
       stopWatchdog();
-      activeAbortController?.abort();
-      activeAbortController = null;
-      if (abortTimeoutId !== null) {
-        clearTimeout(abortTimeoutId);
-        abortTimeoutId = null;
-      }
       keepAliveInFlight = false;
       unsubscribe?.();
       unsubscribe = null;
@@ -1608,6 +1718,8 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         visibilityHandler = null;
       }
       currentExpiresAt = 0;
+      currentRefreshExpiresAt = 0;
+      sessionExpiredEmitted = false;
       api$2 = null;
     }
   };
@@ -2417,37 +2529,6 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       `Loaded ${loadedCount}/${subjectCodes.length}. Review, then use Enroll Selected or enroll manually.`
     );
   }
-  async function ensureTokenFresh() {
-    const api2 = getApi$1();
-    try {
-      const token = sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken);
-      if (!token) return;
-      const parts = token.split(".");
-      if (parts.length !== 3) return;
-      const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-      const expiresAt = payload.exp * 1e3;
-      const remaining = expiresAt - Date.now();
-      api2?.logger.info(`[enroll-debug] ensureTokenFresh: remaining=${Math.round(remaining / 1e3)}s`);
-      if (remaining < 3e4) {
-        api2?.logger.info(
-          "[enroll-debug] ensureTokenFresh: token expiring soon, triggering refresh..."
-        );
-        const pathPrefix = window.location.pathname.split("/")[1] || "hallgatoi";
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5e3);
-        try {
-          await fetch(`/${pathPrefix}/api/Message/GetUnreadedMessagesCount`, {
-            signal: controller.signal
-          });
-        } finally {
-          clearTimeout(timeoutId);
-        }
-        await delay(2e3);
-        api2?.logger.info("[enroll-debug] ensureTokenFresh: refresh triggered, continuing");
-      }
-    } catch {
-    }
-  }
   async function quickEnrollAll() {
     const api2 = getApi$1();
     if (getIsEnrolling()) {
@@ -2478,7 +2559,6 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         api2?.statusPanel.addMessage("warn", msg);
         return;
       }
-      await ensureTokenFresh();
       api2?.statusPanel.addMessage(
         "info",
         `Enrolling ${enrollable.length} subject${enrollable.length === 1 ? "" : "s"}...`
@@ -3685,7 +3765,10 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       const bulletList = document.createElement("ul");
       bulletList.style.cssText = "font-size: 12px; color: #ccc; line-height: 1.8; padding-left: 18px; margin: 0 0 16px 0;";
       const bullets = [
-        { bold: "Keeps the session alive", rest: " by refreshing active Neptun tokens" },
+        {
+          bold: "Session keep-alive is best-effort",
+          rest: "; Neptun may still force logout during course or exam rushes"
+        },
         { bold: "Clicks course controls", rest: " when you ask it to enroll saved selections" },
         { bold: "Clicks exam controls", rest: " when you ask it to enroll saved exam dates" },
         { bold: "May conflict with rules", rest: " at your university or faculty" }

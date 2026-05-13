@@ -1,29 +1,51 @@
 import { decodeJwt } from '../../core/interceptor'
 import type { TokenAcquiredPayload } from '../../types/events'
 import type { NpuModule, ModuleApi, PageContext } from '../../types/modules'
-import { KNOWN_ENDPOINTS, REFRESH_BUFFER_S, SESSION_STORAGE_KEYS } from '../../types/neptun-api'
+import {
+  ACCESS_REFRESH_BUFFER_S,
+  SESSION_REFRESH_BUFFER_S,
+  SESSION_STORAGE_KEYS,
+} from '../../types/neptun-api'
 
-function getRefreshTokenRemaining(): number {
+type RefreshReason = 'access-token' | 'session-timeout'
+
+interface RefreshDecision {
+  shouldRefresh: boolean
+  reason: RefreshReason | null
+  accessRemainingMs: number
+  sessionRemainingMs: number
+}
+
+function getStoredRefreshExpiresAt(): number {
   try {
     const expStr = sessionStorage.getItem(SESSION_STORAGE_KEYS.refreshTokenExpiration)
-    if (!expStr) return -1
+    if (!expStr) return 0
     const expMs = Date.parse(expStr)
-    if (!Number.isFinite(expMs)) return -1
-    return expMs - Date.now()
+    return Number.isFinite(expMs) ? expMs : 0
   } catch {
-    return -1
+    return 0
   }
 }
 
-const REFRESH_BUFFER_MS = REFRESH_BUFFER_S * 1000
+function formatRemaining(ms: number): string {
+  return Number.isFinite(ms) && ms >= 0 ? `${Math.round(ms / 1000)}s` : 'unknown'
+}
+
+const ACCESS_REFRESH_BUFFER_MS = ACCESS_REFRESH_BUFFER_S * 1000
+const SESSION_REFRESH_BUFFER_MS = SESSION_REFRESH_BUFFER_S * 1000
 const WATCHDOG_INTERVAL_MS = 15_000
+const ACTIVITY_PULSE_INTERVAL_MS = 4 * 60_000
+const NATIVE_REFRESH_SETTLE_MS = 6_000
+const FALLBACK_RETRY_MS = 10_000
 
 let watchdogTimer: ReturnType<typeof setInterval> | null = null
+let activityPulseTimer: ReturnType<typeof setInterval> | null = null
 let fallbackRetryTimer: ReturnType<typeof setTimeout> | null = null
+let nativeRefreshSettleTimer: ReturnType<typeof setTimeout> | null = null
 let keepAliveInFlight = false
-let activeAbortController: AbortController | null = null
-let abortTimeoutId: ReturnType<typeof setTimeout> | null = null
 let currentExpiresAt = 0
+let currentRefreshExpiresAt = 0
+let sessionExpiredEmitted = false
 let api: ModuleApi | null = null
 let unsubscribe: (() => void) | null = null
 let visibilityHandler: (() => void) | null = null
@@ -68,42 +90,142 @@ function getExistingTokenPayload(): TokenAcquiredPayload | null {
   }
 }
 
-function getApiPathPrefix(): string {
-  const pathSegments = window.location.pathname.split('/')
-  return pathSegments.length >= 2 ? `/${pathSegments[1]}` : ''
+function getRefreshExpiresAt(): number {
+  const storedRefreshExpiresAt = getStoredRefreshExpiresAt()
+  if (storedRefreshExpiresAt > 0) {
+    currentRefreshExpiresAt = storedRefreshExpiresAt
+  }
+  return currentRefreshExpiresAt
 }
 
-function persistRefreshedTokens(bodyText: string): boolean {
-  if (!bodyText.trim()) return false
+function getSessionRemaining(): number {
+  const refreshExpiresAt = getRefreshExpiresAt()
+  return refreshExpiresAt > 0 ? refreshExpiresAt - Date.now() : -1
+}
+
+function getRefreshDecision(now = Date.now()): RefreshDecision {
+  const accessRemainingMs = currentExpiresAt > 0 ? currentExpiresAt - now : -1
+  const refreshExpiresAt = getRefreshExpiresAt()
+  const sessionRemainingMs = refreshExpiresAt > 0 ? refreshExpiresAt - now : -1
+
+  if (sessionRemainingMs >= 0) {
+    if (sessionRemainingMs <= SESSION_REFRESH_BUFFER_MS) {
+      return {
+        shouldRefresh: true,
+        reason: 'session-timeout',
+        accessRemainingMs,
+        sessionRemainingMs,
+      }
+    }
+
+    return {
+      shouldRefresh: false,
+      reason: null,
+      accessRemainingMs,
+      sessionRemainingMs,
+    }
+  }
+
+  if (currentExpiresAt > 0 && accessRemainingMs <= ACCESS_REFRESH_BUFFER_MS) {
+    return {
+      shouldRefresh: true,
+      reason: 'access-token',
+      accessRemainingMs,
+      sessionRemainingMs,
+    }
+  }
+
+  return {
+    shouldRefresh: false,
+    reason: null,
+    accessRemainingMs,
+    sessionRemainingMs,
+  }
+}
+
+function restoreSessionStatusAfterRefreshFailure(): void {
+  if (!api) return
+
+  const sessionRemaining = getSessionRemaining()
+  if (sessionRemaining > 0) {
+    api.statusPanel.setSessionStatus(
+      sessionRemaining <= SESSION_REFRESH_BUFFER_MS ? 'expiring' : 'active',
+      sessionRemaining,
+    )
+    return
+  }
+
+  const accessRemaining = currentExpiresAt - Date.now()
+  if (currentRefreshExpiresAt <= 0 && accessRemaining > 0) {
+    api.statusPanel.setSessionStatus(
+      accessRemaining <= ACCESS_REFRESH_BUFFER_MS ? 'expiring' : 'active',
+      accessRemaining,
+    )
+    return
+  }
+
+  emitTokenExpired()
+}
+
+function emitTokenExpired(): void {
+  if (sessionExpiredEmitted) return
+  sessionExpiredEmitted = true
+  api?.bus.emit('token:expired', {})
+}
+
+function getStoredAccessToken(): string | null {
+  try {
+    return sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken)
+  } catch {
+    return null
+  }
+}
+
+function hasStoredAccessToken(): boolean {
+  if (getStoredAccessToken()) return true
+  if (!sessionExpiredEmitted) {
+    api?.logger.warn('[session-debug] access token missing from sessionStorage, session lost')
+  }
+  emitTokenExpired()
+  return false
+}
+
+function dispatchNeptunActivityEvent(): void {
+  const target =
+    document.querySelector('.footer__version') ??
+    document.querySelector('app-footer') ??
+    document.body ??
+    document.documentElement ??
+    document
+
+  const activityEvent =
+    typeof window.MouseEvent === 'function'
+      ? new window.MouseEvent('mousedown', {
+          bubbles: true,
+          cancelable: true,
+        })
+      : new window.Event('mousedown', { bubbles: true, cancelable: true })
+
+  target.dispatchEvent(activityEvent)
+}
+
+function requestNeptunNativeRefresh(): void {
+  if (document.visibilityState === 'visible') {
+    try {
+      const visibilityEvent =
+        typeof window.Event === 'function'
+          ? new window.Event('visibilitychange')
+          : new Event('visibilitychange')
+      document.dispatchEvent(visibilityEvent)
+    } catch (err) {
+      api?.logger.warn('[session-debug] failed to dispatch Neptun visibility refresh:', err)
+    }
+  }
 
   try {
-    const data = JSON.parse(bodyText) as {
-      access_token?: string
-      accessToken?: string
-      refresh_token_expiration?: string
-      refreshTokenExpiration?: string
-    }
-
-    const accessToken = data.access_token ?? data.accessToken
-    const refreshTokenExpiration = data.refresh_token_expiration ?? data.refreshTokenExpiration
-
-    if (!accessToken) return false
-
-    sessionStorage.setItem(SESSION_STORAGE_KEYS.accessToken, accessToken)
-
-    if (refreshTokenExpiration) {
-      sessionStorage.setItem(SESSION_STORAGE_KEYS.refreshTokenExpiration, refreshTokenExpiration)
-    }
-
-    const jwt = decodeJwt(accessToken)
-    if (jwt) {
-      currentExpiresAt = jwt.exp * 1000
-    }
-
-    return true
+    dispatchNeptunActivityEvent()
   } catch (err) {
-    api?.logger.warn('failed to parse refresh response JSON:', err)
-    return false
+    api?.logger.warn('[session-debug] failed to dispatch Neptun activity refresh:', err)
   }
 }
 
@@ -112,9 +234,17 @@ function stopWatchdog(): void {
     clearInterval(watchdogTimer)
     watchdogTimer = null
   }
+  if (activityPulseTimer !== null) {
+    clearInterval(activityPulseTimer)
+    activityPulseTimer = null
+  }
   if (fallbackRetryTimer !== null) {
     clearTimeout(fallbackRetryTimer)
     fallbackRetryTimer = null
+  }
+  if (nativeRefreshSettleTimer !== null) {
+    clearTimeout(nativeRefreshSettleTimer)
+    nativeRefreshSettleTimer = null
   }
 }
 
@@ -126,136 +256,145 @@ function startWatchdog(): void {
   watchdogTimer = setInterval(() => {
     if (!currentExpiresAt || !api) return
     if (keepAliveInFlight) return
+    if (!hasStoredAccessToken()) return
 
-    const remainingMs = currentExpiresAt - Date.now()
+    const decision = getRefreshDecision()
     api.logger.info(
-      `[session-debug] watchdog tick: ${Math.round(remainingMs / 1000)}s remaining, buffer=${REFRESH_BUFFER_S}s`,
+      `[session-debug] watchdog tick: access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}, accessBuffer=${ACCESS_REFRESH_BUFFER_S}s, sessionBuffer=${SESSION_REFRESH_BUFFER_S}s`,
     )
 
-    if (Date.now() >= currentExpiresAt - REFRESH_BUFFER_MS) {
-      api.logger.info('[session-debug] watchdog tick: token is inside refresh buffer')
-      triggerKeepAlive()
+    if (currentRefreshExpiresAt > 0 && decision.sessionRemainingMs <= 0) {
+      api.logger.warn('[session-debug] refresh token expired, session lost')
+      emitTokenExpired()
+      return
+    }
+
+    if (decision.shouldRefresh && decision.reason) {
+      api.logger.info(`[session-debug] watchdog tick: ${decision.reason} is inside refresh buffer`)
+      triggerKeepAlive(decision.reason)
     } else {
       api.logger.info('[session-debug] watchdog tick: token still fresh, skipping refresh')
     }
   }, WATCHDOG_INTERVAL_MS)
 }
 
-function triggerKeepAlive(): void {
-  if (!api) return
-  if (keepAliveInFlight) return
+function startActivityPulse(): void {
+  if (activityPulseTimer !== null) return
 
-  let accessToken: string | null
-  try {
-    accessToken = sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken)
-  } catch {
-    accessToken = null
-  }
+  api?.logger.info('[session-debug] startActivityPulse: starting 4m native activity interval')
 
-  if (!accessToken) {
-    api.logger.warn('[session-debug] cannot refresh session: no access token in sessionStorage')
+  activityPulseTimer = setInterval(() => {
+    if (!currentExpiresAt || !api) return
+    if (keepAliveInFlight) return
+    if (!hasStoredAccessToken()) return
+
+    const decision = getRefreshDecision()
+    if (currentRefreshExpiresAt > 0 && decision.sessionRemainingMs <= 0) {
+      api.logger.warn('[session-debug] activity pulse skipped because refresh token is expired')
+      emitTokenExpired()
+      return
+    }
+
+    api.logger.info(
+      `[session-debug] activity pulse: access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}`,
+    )
+    requestNeptunNativeRefresh()
+  }, ACTIVITY_PULSE_INTERVAL_MS)
+}
+
+function warnRegistrationRushLimit(): void {
+  const path = window.location.pathname.toLowerCase()
+  if (
+    !path.includes('/subjects/registration') &&
+    !path.includes('/exams/overview/registration')
+  ) {
     return
   }
 
+  api?.statusPanel.addMessage(
+    'warn',
+    'Session keep-alive is best-effort; Neptun may still force logout during registration rushes.',
+  )
+}
+
+function triggerKeepAlive(reason: RefreshReason = 'access-token'): void {
+  if (!api) return
+  if (keepAliveInFlight) return
+
+  const previousAccessToken = getStoredAccessToken()
+  if (!previousAccessToken) {
+    api.logger.warn('[session-debug] cannot refresh session: no access token in sessionStorage')
+    emitTokenExpired()
+    return
+  }
+  const previousRefreshExpiresAt = getRefreshExpiresAt()
+
   keepAliveInFlight = true
 
-  const remainingMs = Math.max(0, currentExpiresAt - Date.now())
-  api.statusPanel.setSessionStatus('refreshing')
+  const accessRemainingMs = Math.max(0, currentExpiresAt - Date.now())
+  const sessionRemainingMs = getSessionRemaining()
+  const visibleRemainingMs = sessionRemainingMs >= 0 ? sessionRemainingMs : accessRemainingMs
   api.bus.emit('token:expiring', {
-    expiresAt: currentExpiresAt,
-    remainingMs,
+    expiresAt: currentRefreshExpiresAt || currentExpiresAt,
+    remainingMs: visibleRemainingMs,
   })
+  api.statusPanel.setSessionStatus('refreshing')
 
   api.logger.info(
-    `[session-debug] firing session refresh request with ${Math.round(remainingMs / 1000)}s left on access token`,
+    `[session-debug] requesting native Neptun refresh (${reason}) with access=${formatRemaining(accessRemainingMs)}, session=${formatRemaining(sessionRemainingMs)}`,
   )
 
-  const refreshUrl = `${getApiPathPrefix()}/api/${KNOWN_ENDPOINTS.getNewTokens}`
+  requestNeptunNativeRefresh()
 
-  activeAbortController = new AbortController()
-  abortTimeoutId = setTimeout(() => activeAbortController?.abort(), 10_000)
+  nativeRefreshSettleTimer = setTimeout(() => {
+    nativeRefreshSettleTimer = null
+    const payload = getExistingTokenPayload()
+    const latestAccessToken = getStoredAccessToken()
+    const latestRefreshExpiresAt = getRefreshExpiresAt()
 
-  fetch(refreshUrl, {
-    method: 'POST',
-    credentials: 'include',
-    body: '{}',
-    signal: activeAbortController.signal,
-    headers: {
-      Accept: 'application/json, text/plain, */*',
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-  })
-    .then(async (response) => {
-      if (abortTimeoutId !== null) {
-        clearTimeout(abortTimeoutId)
-        abortTimeoutId = null
-      }
-      activeAbortController = null
-
-      try {
-        if (response.ok) {
-          api?.logger.info('[session-debug] refresh request returned 200 OK')
-          const bodyText = await response.text()
-          const persisted = persistRefreshedTokens(bodyText)
-          if (persisted) {
-            api?.logger.info('session refresh succeeded')
-          } else {
-            api?.logger.warn('session refresh succeeded but returned no token payload')
-          }
-        } else if (response.status === 401 || response.status === 403) {
-          api?.logger.warn(`[session-debug] refresh request returned auth error ${response.status}`)
-          const refreshRemaining = getRefreshTokenRemaining()
-          if (refreshRemaining > 0) {
-            api?.logger.warn(
-              `refresh endpoint was rejected while refresh token still looks valid (${Math.round(refreshRemaining / 1000)}s left)`,
-            )
-          } else {
-            api?.logger.warn('session refresh was rejected and refresh token expired, session lost')
-            api?.bus.emit('token:expired', {})
-          }
-        } else {
-          api?.logger.warn(
-            `[session-debug] refresh request returned unexpected status ${response.status}`,
-          )
-          api?.logger.warn(`session refresh returned unexpected status: ${response.status}`)
-        }
-      } finally {
-        keepAliveInFlight = false
-      }
-    })
-    .catch((err) => {
-      if (abortTimeoutId !== null) {
-        clearTimeout(abortTimeoutId)
-        abortTimeoutId = null
-      }
-      activeAbortController = null
+    if (
+      payload &&
+      (latestAccessToken !== previousAccessToken ||
+        latestRefreshExpiresAt > previousRefreshExpiresAt)
+    ) {
       keepAliveInFlight = false
+      api?.logger.info('[session-debug] native Neptun refresh succeeded')
+      api?.bus.emit('token:acquired', payload)
+      return
+    }
 
-      if (!api) return
+    keepAliveInFlight = false
 
-      api.logger.warn('session refresh request failed:', err)
+    if (!api) return
 
-      if (Date.now() >= currentExpiresAt) {
-        api.logger.warn('token has expired and session refresh failed, session lost')
-        api.bus.emit('token:expired', {})
+    api.logger.warn('[session-debug] native Neptun refresh did not update stored tokens')
+
+    const sessionRemaining = getSessionRemaining()
+    const accessRemaining = currentExpiresAt - Date.now()
+    const retryWindowRemaining = sessionRemaining > 0 ? sessionRemaining : accessRemaining
+
+    if (currentRefreshExpiresAt > 0 && sessionRemaining <= 0) {
+      api.logger.warn('refresh token expired and native session refresh failed, session lost')
+      emitTokenExpired()
+    } else if (currentRefreshExpiresAt <= 0 && accessRemaining <= 0) {
+      api.logger.warn('token has expired and native session refresh failed, session lost')
+      emitTokenExpired()
+    } else {
+      restoreSessionStatusAfterRefreshFailure()
+      if (retryWindowRemaining > 15_000) {
+        api.logger.info('session still valid, scheduling native refresh retry')
+        if (fallbackRetryTimer !== null) clearTimeout(fallbackRetryTimer)
+        fallbackRetryTimer = setTimeout(() => {
+          fallbackRetryTimer = null
+          triggerKeepAlive(reason)
+        }, FALLBACK_RETRY_MS)
       } else {
-        const remaining = currentExpiresAt - Date.now()
-        if (remaining > 15_000) {
-          api.logger.info('token still valid, scheduling 10s fallback retry')
-          api.statusPanel.setSessionStatus('refreshing')
-          if (fallbackRetryTimer !== null) clearTimeout(fallbackRetryTimer)
-          fallbackRetryTimer = setTimeout(() => {
-            fallbackRetryTimer = null
-            triggerKeepAlive()
-          }, 10_000)
-        } else {
-          api.logger.info(
-            `token has only ${Math.round(remaining / 1000)}s left, watchdog will handle`,
-          )
-        }
+        api.logger.info(
+          `refresh window has only ${Math.round(retryWindowRemaining / 1000)}s left, watchdog will handle`,
+        )
       }
-    })
+    }
+  }, NATIVE_REFRESH_SETTLE_MS)
 }
 
 function onTokenAcquired(payload: TokenAcquiredPayload): void {
@@ -265,6 +404,9 @@ function onTokenAcquired(payload: TokenAcquiredPayload): void {
   }
 
   currentExpiresAt = payload.expiresAt
+  currentRefreshExpiresAt =
+    payload.refreshExpiresAt || getStoredRefreshExpiresAt() || currentRefreshExpiresAt
+  sessionExpiredEmitted = false
   api?.logger.info(
     `[session-debug] token acquired: access expires in ${Math.round((payload.expiresAt - Date.now()) / 1000)}s, refresh expires in ${payload.refreshExpiresAt ? Math.round((payload.refreshExpiresAt - Date.now()) / 1000) : 'unknown'}s`,
   )
@@ -275,7 +417,15 @@ function onTokenAcquired(payload: TokenAcquiredPayload): void {
     api?.logger.info('[session-debug] cleared pending fallback retry after token update')
   }
 
+  if (keepAliveInFlight && nativeRefreshSettleTimer !== null) {
+    clearTimeout(nativeRefreshSettleTimer)
+    nativeRefreshSettleTimer = null
+    keepAliveInFlight = false
+    api?.logger.info('[session-debug] native refresh observed by token watcher')
+  }
+
   startWatchdog()
+  startActivityPulse()
 }
 
 function hydrateFromSessionStorage(): void {
@@ -298,16 +448,16 @@ function onVisibilityChange(): void {
     if (!currentExpiresAt || !api) return
     if (keepAliveInFlight) return
 
-    const remaining = currentExpiresAt - Date.now()
+    const decision = getRefreshDecision()
     api.logger.info(
-      `[session-debug] onVisibilityChange: tab visible, remaining=${Math.round(remaining / 1000)}s, buffer=${REFRESH_BUFFER_S}s`,
+      `[session-debug] onVisibilityChange: tab visible, access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}, accessBuffer=${ACCESS_REFRESH_BUFFER_S}s, sessionBuffer=${SESSION_REFRESH_BUFFER_S}s`,
     )
 
-    if (remaining <= REFRESH_BUFFER_MS) {
+    if (decision.shouldRefresh && decision.reason) {
       api.logger.info(
-        '[session-debug] onVisibilityChange: token near expiry, triggering keep-alive immediately',
+        `[session-debug] onVisibilityChange: ${decision.reason} near expiry, triggering keep-alive immediately`,
       )
-      triggerKeepAlive()
+      triggerKeepAlive(decision.reason)
     }
   } catch (err) {
     api?.logger.error('error in visibility change handler:', err)
@@ -361,7 +511,8 @@ function suppressSessionTimeoutModals(): void {
 export const infiniteSessionModule: NpuModule = {
   id: 'infinite-session',
   name: 'Infinite Session',
-  description: 'Keeps the current Neptun session alive when possible',
+  description:
+    'Best-effort session keep-alive for normal use; Neptun can still force logout during registration rushes',
 
   shouldActivate(_context: PageContext): boolean {
     return true
@@ -376,20 +527,13 @@ export const infiniteSessionModule: NpuModule = {
 
     suppressSessionTimeoutModals()
     hydrateFromSessionStorage()
+    warnRegistrationRushLimit()
 
     api.logger.info('initialized, waiting for token from sessionStorage watcher')
   },
 
   dispose(): void {
     stopWatchdog()
-    activeAbortController?.abort()
-    activeAbortController = null
-
-    if (abortTimeoutId !== null) {
-      clearTimeout(abortTimeoutId)
-      abortTimeoutId = null
-    }
-
     keepAliveInFlight = false
     unsubscribe?.()
     unsubscribe = null
@@ -402,6 +546,8 @@ export const infiniteSessionModule: NpuModule = {
     }
 
     currentExpiresAt = 0
+    currentRefreshExpiresAt = 0
+    sessionExpiredEmitted = false
     api = null
   },
 }

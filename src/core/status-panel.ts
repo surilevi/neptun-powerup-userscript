@@ -311,6 +311,8 @@ export function createStatusPanel(
       color: ${COLORS.textMuted};
     `
     sessionLine.textContent = 'Session: waiting for token...'
+    sessionLine.title =
+      'Session keep-alive is best-effort. Neptun may still force logout during course or exam registration rushes.'
     sessionSection.appendChild(sessionLine)
 
     // Rush mode toggles section
@@ -379,7 +381,8 @@ export function createStatusPanel(
     // Course Rush toggle
     const courseLabel = document.createElement('label')
     courseLabel.className = 'npu-rush-toggle'
-    courseLabel.title = 'After login, open course registration and enroll saved courses'
+    courseLabel.title =
+      'After login, open course registration and enroll saved courses. Session keep-alive is not guaranteed during registration rushes.'
     courseRushToggle = document.createElement('input')
     courseRushToggle.type = 'checkbox'
     courseRushToggle.checked = courseRushOn
@@ -400,7 +403,8 @@ export function createStatusPanel(
     // Exam Rush toggle
     const examLabel = document.createElement('label')
     examLabel.className = 'npu-rush-toggle'
-    examLabel.title = 'After login, open exams and enroll saved dates'
+    examLabel.title =
+      'After login, open exams and enroll saved dates. Session keep-alive is not guaranteed during registration rushes.'
     examRushToggle = document.createElement('input')
     examRushToggle.type = 'checkbox'
     examRushToggle.checked = examRushOn

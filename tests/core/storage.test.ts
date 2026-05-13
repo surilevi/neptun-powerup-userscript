@@ -67,4 +67,19 @@ describe('StorageService', () => {
     const stored = JSON.parse(gmStore['npu3'])
     expect(stored.test).toBe('value')
   })
+
+  it('should serialize concurrent writes so settings are not lost', async () => {
+    const storage = createStorageService(gmMock, 'example.hu')
+
+    await Promise.all([
+      storage.set('courseRushMode', true),
+      storage.setForDomain('themeSettings', { enabled: true, color: 'blue' }),
+    ])
+
+    expect(await storage.get<boolean>('courseRushMode')).toBe(true)
+    expect(await storage.getForDomain<{ enabled: boolean; color: string }>('themeSettings')).toEqual({
+      enabled: true,
+      color: 'blue',
+    })
+  })
 })
