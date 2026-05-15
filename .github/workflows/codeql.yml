@@ -1,23 +1,27 @@
-name: CI
+name: CodeQL
 
 on:
   push:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron: '23 3 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
+  security-events: write
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  validate:
+  analyze:
+    name: Analyze JavaScript and TypeScript
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -39,28 +43,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Format check
-        run: pnpm format:check
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Test
-        run: pnpm test
-
-      - name: Build
-        run: pnpm build
-
-      - name: Verify committed userscript build
-        run: git diff --exit-code -- dist/npu.user.js
-
-      - name: Upload userscript artifact
-        if: success()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@7c1e4cf0b20d7c1872b26569c00ba908797a59bf # v4
         with:
-          name: npu-userscript
-          path: dist/npu.user.js
-          retention-days: 14
+          languages: javascript-typescript
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@7c1e4cf0b20d7c1872b26569c00ba908797a59bf # v4

@@ -7,7 +7,15 @@ describe('THEME_PRESETS', () => {
   })
 
   it('each preset has all 7 required color fields', () => {
-    const requiredFields = ['primary', 'dark', 'light', 'bgTint', 'link', 'tableHeader', 'footerText']
+    const requiredFields = [
+      'primary',
+      'dark',
+      'light',
+      'bgTint',
+      'link',
+      'tableHeader',
+      'footerText',
+    ]
     for (const preset of THEME_PRESETS) {
       for (const field of requiredFields) {
         expect(preset).toHaveProperty(field)

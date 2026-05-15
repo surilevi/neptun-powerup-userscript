@@ -12,7 +12,9 @@ function createMockStorage(): StorageService & {
     set: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
     getForDomain: vi.fn(async (key: string) => data[key] as never),
-    setForDomain: vi.fn(async (key: string, value: unknown) => { data[key] = value }),
+    setForDomain: vi.fn(async (key: string, value: unknown) => {
+      data[key] = value
+    }),
   }
 }
 

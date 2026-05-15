@@ -24,34 +24,20 @@ async function main(): Promise<void> {
 
   logger.info('Neptun PowerUp! v3 starting...')
 
-  // Resolve GM storage (provided by TamperMonkey at runtime), with localStorage fallback
-  let gmStorage: GmStorage
-  try {
-    // Test if GM API is available
-    const testGm = typeof GM !== 'undefined' && GM.getValue
-    if (!testGm) throw new Error('GM API not available')
-    gmStorage = {
-      getValue: (key, defaultVal) => GM.getValue(key, defaultVal),
-      setValue: (key, value) => GM.setValue(key, value),
-    }
-  } catch (err) {
-    logger.warn('GM API unavailable, falling back to localStorage:', err)
-    gmStorage = {
-      getValue: async (key, defaultVal) => {
-        try {
-          return localStorage.getItem(`npu_${key}`) ?? defaultVal
-        } catch {
-          return defaultVal
-        }
-      },
-      setValue: async (key, value) => {
-        try {
-          localStorage.setItem(`npu_${key}`, value)
-        } catch (storageErr) {
-          logger.error('localStorage.setItem failed:', storageErr)
-        }
-      },
-    }
+  // Resolve GM storage (provided by Tampermonkey at runtime). Do not fall back
+  // to page localStorage: that storage is visible to same-origin page scripts.
+  if (
+    typeof GM === 'undefined' ||
+    typeof GM.getValue !== 'function' ||
+    typeof GM.setValue !== 'function'
+  ) {
+    logger.error('Tampermonkey GM storage API is unavailable; NPU will not activate.')
+    return
+  }
+
+  const gmStorage: GmStorage = {
+    getValue: (key, defaultVal) => GM.getValue(key, defaultVal),
+    setValue: (key, value) => GM.setValue(key, value),
   }
 
   // Build initial page context

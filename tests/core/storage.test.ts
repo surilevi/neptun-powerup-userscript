@@ -60,10 +60,7 @@ describe('StorageService', () => {
     const storage = createStorageService(gmMock, 'example.hu')
     await storage.set('test', 'value')
 
-    expect(gmMock.setValue).toHaveBeenCalledWith(
-      'npu3',
-      expect.any(String),
-    )
+    expect(gmMock.setValue).toHaveBeenCalledWith('npu3', expect.any(String))
     const stored = JSON.parse(gmStore['npu3'])
     expect(stored.test).toBe('value')
   })
@@ -77,7 +74,9 @@ describe('StorageService', () => {
     ])
 
     expect(await storage.get<boolean>('courseRushMode')).toBe(true)
-    expect(await storage.getForDomain<{ enabled: boolean; color: string }>('themeSettings')).toEqual({
+    expect(
+      await storage.getForDomain<{ enabled: boolean; color: string }>('themeSettings'),
+    ).toEqual({
       enabled: true,
       color: 'blue',
     })

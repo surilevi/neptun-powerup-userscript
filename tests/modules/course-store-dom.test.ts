@@ -1,7 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModuleApi } from '../../src/types/modules'
-import { autoSearchSubjects, extractCourseCode, extractSubjectCode, findSubjectPanel, isCourseSelected, isEnrollButtonText, waitForSubjectListing } from '../../src/modules/course-store/dom'
+import {
+  autoSearchSubjects,
+  extractCourseCode,
+  extractSubjectCode,
+  findSubjectPanel,
+  isCourseSelected,
+  isEnrollButtonText,
+  waitForSubjectListing,
+} from '../../src/modules/course-store/dom'
 import { setApi } from '../../src/modules/course-store/state'
 
 function createMockApi(): ModuleApi {
@@ -257,23 +265,31 @@ describe('course-store autoSearchSubjects', () => {
   })
 
   it('waits for subject panels that render after the search request completes', async () => {
-    vi.stubGlobal('PerformanceObserver', class {
-      private callback: PerformanceObserverCallback
-      constructor(callback: PerformanceObserverCallback) {
-        this.callback = callback
-        setTimeout(() => {
-          this.callback({
-            getEntries: () => [{
-              name: 'https://neptun.bme.hu/hallgatoi/api/SubjectApplication/SchedulableSubjects',
-              responseStatus: 200,
-              startTime: 50,
-            }],
-          } as unknown as PerformanceObserverEntryList, this as unknown as PerformanceObserver)
-        }, 100)
-      }
-      observe() {}
-      disconnect() {}
-    })
+    vi.stubGlobal(
+      'PerformanceObserver',
+      class {
+        private callback: PerformanceObserverCallback
+        constructor(callback: PerformanceObserverCallback) {
+          this.callback = callback
+          setTimeout(() => {
+            this.callback(
+              {
+                getEntries: () => [
+                  {
+                    name: 'https://neptun.bme.hu/hallgatoi/api/SubjectApplication/SchedulableSubjects',
+                    responseStatus: 200,
+                    startTime: 50,
+                  },
+                ],
+              } as unknown as PerformanceObserverEntryList,
+              this as unknown as PerformanceObserver,
+            )
+          }, 100)
+        }
+        observe() {}
+        disconnect() {}
+      },
+    )
 
     const btn = document.createElement('button')
     btn.textContent = 'Targy keresese'
@@ -294,23 +310,31 @@ describe('course-store autoSearchSubjects', () => {
   })
 
   it('reports when the search request settles without rendering subject panels', async () => {
-    vi.stubGlobal('PerformanceObserver', class {
-      private callback: PerformanceObserverCallback
-      constructor(callback: PerformanceObserverCallback) {
-        this.callback = callback
-        setTimeout(() => {
-          this.callback({
-            getEntries: () => [{
-              name: 'https://neptun.bme.hu/hallgatoi/api/SubjectApplication/SchedulableSubjects',
-              responseStatus: 200,
-              startTime: 50,
-            }],
-          } as unknown as PerformanceObserverEntryList, this as unknown as PerformanceObserver)
-        }, 100)
-      }
-      observe() {}
-      disconnect() {}
-    })
+    vi.stubGlobal(
+      'PerformanceObserver',
+      class {
+        private callback: PerformanceObserverCallback
+        constructor(callback: PerformanceObserverCallback) {
+          this.callback = callback
+          setTimeout(() => {
+            this.callback(
+              {
+                getEntries: () => [
+                  {
+                    name: 'https://neptun.bme.hu/hallgatoi/api/SubjectApplication/SchedulableSubjects',
+                    responseStatus: 200,
+                    startTime: 50,
+                  },
+                ],
+              } as unknown as PerformanceObserverEntryList,
+              this as unknown as PerformanceObserver,
+            )
+          }, 100)
+        }
+        observe() {}
+        disconnect() {}
+      },
+    )
 
     const btn = document.createElement('button')
     btn.textContent = 'Targy keresese'
@@ -329,23 +353,31 @@ describe('course-store autoSearchSubjects', () => {
   it('can auto-click a search button that appears only during the second-stage wait', async () => {
     const clickSpy = vi.fn()
 
-    vi.stubGlobal('PerformanceObserver', class {
-      private callback: PerformanceObserverCallback
-      constructor(callback: PerformanceObserverCallback) {
-        this.callback = callback
-        setTimeout(() => {
-          this.callback({
-            getEntries: () => [{
-              name: 'https://neptun.bme.hu/hallgatoi/api/SubjectApplication/SchedulableSubjects',
-              responseStatus: 200,
-              startTime: 35_000,
-            }],
-          } as unknown as PerformanceObserverEntryList, this as unknown as PerformanceObserver)
-        }, 35_100)
-      }
-      observe() {}
-      disconnect() {}
-    })
+    vi.stubGlobal(
+      'PerformanceObserver',
+      class {
+        private callback: PerformanceObserverCallback
+        constructor(callback: PerformanceObserverCallback) {
+          this.callback = callback
+          setTimeout(() => {
+            this.callback(
+              {
+                getEntries: () => [
+                  {
+                    name: 'https://neptun.bme.hu/hallgatoi/api/SubjectApplication/SchedulableSubjects',
+                    responseStatus: 200,
+                    startTime: 35_000,
+                  },
+                ],
+              } as unknown as PerformanceObserverEntryList,
+              this as unknown as PerformanceObserver,
+            )
+          }, 35_100)
+        }
+        observe() {}
+        disconnect() {}
+      },
+    )
 
     const promise = waitForSubjectListing({
       timeoutMs: 60_000,

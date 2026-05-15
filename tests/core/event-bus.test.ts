@@ -16,7 +16,12 @@ describe('EventBus', () => {
   it('should pass correct payload to subscriber', () => {
     const bus = createEventBus()
     const handler = vi.fn()
-    const payload = { accessToken: 'abc', refreshToken: 'def', expiresAt: 1000, refreshExpiresAt: 0 }
+    const payload = {
+      accessToken: 'abc',
+      refreshToken: 'def',
+      expiresAt: 1000,
+      refreshExpiresAt: 0,
+    }
 
     bus.on('token:acquired', handler)
     bus.emit('token:acquired', payload)
@@ -42,7 +47,12 @@ describe('EventBus', () => {
     const handler = vi.fn()
 
     bus.on('token:expired', handler)
-    bus.emit('token:acquired', { accessToken: 'a', refreshToken: 'b', expiresAt: 1, refreshExpiresAt: 0 })
+    bus.emit('token:acquired', {
+      accessToken: 'a',
+      refreshToken: 'b',
+      expiresAt: 1,
+      refreshExpiresAt: 0,
+    })
 
     expect(handler).not.toHaveBeenCalled()
   })
