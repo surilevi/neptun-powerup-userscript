@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@ac6db6d3c1f721f886538a378a2d73e85697340a # v6
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
         with:
           version: 10.32.1
 
@@ -44,9 +44,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@7c1e4cf0b20d7c1872b26569c00ba908797a59bf # v4
+        uses: github/codeql-action/init@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4
         with:
           languages: javascript-typescript
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@7c1e4cf0b20d7c1872b26569c00ba908797a59bf # v4
+        uses: github/codeql-action/analyze@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4
