@@ -9,19 +9,11 @@ function safeLower(value: string | null | undefined): string {
   return (value ?? '').toLowerCase()
 }
 
-export function isSupportedPortalPath(pathname: string): boolean {
-  const path = safeLower(pathname)
-  return SUPPORTED_PORTAL_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
+function hasNeptunTitle(doc: Document): boolean {
+  return /\bneptun(?:\s+web|\.net)?\b/i.test(doc.title)
 }
 
-export function hasNeptunFingerprint(doc: Document = document): boolean {
-  const title = safeLower(doc.title)
-  if (title.includes('neptun')) return true
-
-  const html = doc.documentElement
-  const htmlText = safeLower(html?.textContent?.slice(0, 2000))
-  if (htmlText.includes('neptun web') || htmlText.includes('neptun')) return true
-
+function hasNeptunAssetMarker(doc: Document): boolean {
   const attributedNodes = Array.from(
     doc.querySelectorAll('script[src], link[href], img[src], meta[content]'),
   )
@@ -33,18 +25,41 @@ export function hasNeptunFingerprint(doc: Document = document): boolean {
       node.getAttribute('content'),
     ]
 
-    return values.some((value) => safeLower(value).includes('neptun'))
+    return values.some((value) => {
+      const marker = safeLower(value)
+      return marker.includes('neptun') || marker.includes('/hallgato')
+    })
   })
+}
+
+function hasNeptunAppShell(doc: Document): boolean {
+  return Boolean(
+    doc.querySelector(
+      ['app-root', 'app-login', 'app-footer', 'app-header', '[data-neptun]', '[ng-version]'].join(
+        ',',
+      ),
+    ),
+  )
+}
+
+export function isSupportedPortalPath(pathname: string): boolean {
+  const path = safeLower(pathname)
+  return SUPPORTED_PORTAL_PREFIXES.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+  )
+}
+
+export function hasNeptunFingerprint(doc: Document = document): boolean {
+  if (hasNeptunTitle(doc)) return true
+
+  return hasNeptunAppShell(doc) && hasNeptunAssetMarker(doc)
 }
 
 export function hasNeptunSessionStorage(storage: Storage = sessionStorage): boolean {
   try {
-    return [
-      'access_token',
-      'refresh_token_expiration',
-      'login_type',
-      'tabId',
-    ].some((key) => storage.getItem(key) !== null)
+    return ['access_token', 'refresh_token_expiration', 'login_type', 'tabId'].some(
+      (key) => storage.getItem(key) !== null,
+    )
   } catch {
     return false
   }

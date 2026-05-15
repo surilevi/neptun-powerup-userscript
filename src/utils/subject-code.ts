@@ -35,9 +35,7 @@ export function extractSubjectCodeFromText(text: string): string | null {
     const position = match.index ?? 0
     const relativePosition = normalizedText.length > 0 ? position / normalizedText.length : 0
     const score =
-      candidate.length * 10 +
-      (candidate.includes('-') ? 15 : 0) +
-      Math.round(relativePosition * 10)
+      candidate.length * 10 + (candidate.includes('-') ? 15 : 0) + Math.round(relativePosition * 10)
 
     if (score > bestScore) {
       bestCandidate = candidate

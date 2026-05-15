@@ -14,6 +14,10 @@ export default defineConfig({
         author: 'surilevi',
         license: 'MIT',
         icon: 'https://www.google.com/s2/favicons?sz=64&domain=neptun.net',
+        updateURL:
+          'https://github.com/surilevi/neptun-powerup-userscript/raw/main/dist/npu.user.js',
+        downloadURL:
+          'https://github.com/surilevi/neptun-powerup-userscript/raw/main/dist/npu.user.js',
         match: [
           // Generic Neptun student portals:
           // hallgatoi, hallgato_ng, hallgatoing, etc.
@@ -22,6 +26,7 @@ export default defineConfig({
           'https://*/ujhallgato/*',
         ],
         grant: ['GM.getValue', 'GM.setValue', 'GM.info'],
+        noframes: true,
       },
       build: {
         fileName: 'npu.user.js',

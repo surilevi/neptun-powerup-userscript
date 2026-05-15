@@ -304,10 +304,7 @@ function startActivityPulse(): void {
 
 function warnRegistrationRushLimit(): void {
   const path = window.location.pathname.toLowerCase()
-  if (
-    !path.includes('/subjects/registration') &&
-    !path.includes('/exams/overview/registration')
-  ) {
+  if (!path.includes('/subjects/registration') && !path.includes('/exams/overview/registration')) {
     return
   }
 

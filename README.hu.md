@@ -46,6 +46,7 @@ Emiatt több intézményi Neptun-telepítésen is működhet külön build nélk
 ## Adatkezelés
 
 - A script a saját beállításait és mentett választásait Tampermonkey-tárhelyen tárolja.
+- Ha a Tampermonkey tárhely-API nem érhető el, az NPU nem aktiválódik.
 - Felhasználónevet és jelszót nem ment tartósan.
 - A részletes debug naplózás csak akkor aktív, ha külön bekapcsolod.
 

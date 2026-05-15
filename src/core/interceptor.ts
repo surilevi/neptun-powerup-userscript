@@ -75,7 +75,9 @@ export function setupInterceptor(bus: EventBus, logger: Logger): () => void {
       // Token was removed (logout)
       if (lastToken !== null) {
         lastToken = null
-        logger.info('[interceptor-debug] checkToken: access token removed from sessionStorage (logout?)')
+        logger.info(
+          '[interceptor-debug] checkToken: access token removed from sessionStorage (logout?)',
+        )
       }
       return
     }
@@ -89,7 +91,9 @@ export function setupInterceptor(bus: EventBus, logger: Logger): () => void {
     const jwt = decodeJwt(token)
 
     if (!jwt) {
-      logger.warn(`[interceptor-debug] checkToken: decode failed for token with ${parts.length} parts`)
+      logger.warn(
+        `[interceptor-debug] checkToken: decode failed for token with ${parts.length} parts`,
+      )
       return
     }
     logger.info(`[interceptor-debug] checkToken: decoded JWT, exp=${jwt.exp}`)
@@ -102,9 +106,7 @@ export function setupInterceptor(bus: EventBus, logger: Logger): () => void {
       return
     }
 
-    const refreshExpiration = readSessionStorage(
-      SESSION_STORAGE_KEYS.refreshTokenExpiration,
-    )
+    const refreshExpiration = readSessionStorage(SESSION_STORAGE_KEYS.refreshTokenExpiration)
 
     // Parse refresh token expiry from ISO string to milliseconds
     let refreshExpiresAt = 0
@@ -113,7 +115,9 @@ export function setupInterceptor(bus: EventBus, logger: Logger): () => void {
       if (Number.isFinite(parsed)) {
         refreshExpiresAt = parsed
       } else {
-        logger.warn(`[interceptor-debug] refresh_token_expiration is not a valid date: "${refreshExpiration}"`)
+        logger.warn(
+          `[interceptor-debug] refresh_token_expiration is not a valid date: "${refreshExpiration}"`,
+        )
       }
     }
 

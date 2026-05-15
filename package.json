@@ -3,33 +3,58 @@
   "version": "3.1.3",
   "description": "Neptun helper userscript for course and exam workflows",
   "type": "module",
+  "packageManager": "pnpm@10.32.1",
+  "homepage": "https://github.com/surilevi/neptun-powerup-userscript#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/surilevi/neptun-powerup-userscript.git"
+  },
+  "bugs": {
+    "url": "https://github.com/surilevi/neptun-powerup-userscript/issues"
+  },
+  "keywords": [
+    "neptun",
+    "tampermonkey",
+    "userscript",
+    "typescript",
+    "student-portal"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint src/ tests/",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "audit": "pnpm audit --audit-level moderate"
   },
   "author": "surilevi",
   "license": "MIT",
   "pnpm": {
+    "overrides": {
+      "brace-expansion@<1.1.13": "1.1.13",
+      "brace-expansion@>=4.0.0 <5.0.5": "5.0.6",
+      "minimatch@<3.1.4": "3.1.4",
+      "minimatch@>=10.0.0 <10.2.5": "10.2.5",
+      "picomatch@<4.0.4": "4.0.4",
+      "postcss@<8.5.10": "8.5.10"
+    },
     "onlyBuiltDependencies": [
       "esbuild"
     ]
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.0.3",
-    "globals": "^17.4.0",
-    "jsdom": "^29.0.1",
-    "prettier": "^3.8.1",
+    "eslint": "^10.3.0",
+    "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.8.3",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.1",
-    "vite": "^7.3.1",
+    "typescript-eslint": "^8.59.3",
+    "vite": "^7.3.3",
     "vite-plugin-monkey": "^7.1.9",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.6"
   }
 }

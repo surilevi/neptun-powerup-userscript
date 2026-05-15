@@ -6,11 +6,18 @@
 // @description  Neptun helper userscript for course and exam workflows
 // @license      MIT
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=neptun.net
+// @homepage     https://github.com/surilevi/neptun-powerup-userscript#readme
+// @homepageURL  https://github.com/surilevi/neptun-powerup-userscript#readme
+// @source       https://github.com/surilevi/neptun-powerup-userscript.git
+// @supportURL   https://github.com/surilevi/neptun-powerup-userscript/issues
+// @downloadURL  https://github.com/surilevi/neptun-powerup-userscript/raw/main/dist/npu.user.js
+// @updateURL    https://github.com/surilevi/neptun-powerup-userscript/raw/main/dist/npu.user.js
 // @match        https://*/hallgato*/*
 // @match        https://*/ujhallgato/*
 // @grant        GM.getValue
 // @grant        GM.info
 // @grant        GM.setValue
+// @noframes
 // ==/UserScript==
 
 (function () {
@@ -232,11 +239,61 @@
   }
   const STYLE_ID = "npu-theme-mode";
   const THEME_PRESETS = [
-    { name: "Pink", key: "pink", primary: "#e91e63", dark: "#880e4f", light: "#f48fb1", bgTint: "#fdf2f6", link: "#c2185b", tableHeader: "#ec407a", footerText: "#fce4ec" },
-    { name: "Purple", key: "purple", primary: "#9c27b0", dark: "#4a148c", light: "#ce93d8", bgTint: "#f3e5f5", link: "#7b1fa2", tableHeader: "#ab47bc", footerText: "#e1bee7" },
-    { name: "Teal", key: "teal", primary: "#009688", dark: "#004d40", light: "#80cbc4", bgTint: "#e0f2f1", link: "#00796b", tableHeader: "#26a69a", footerText: "#b2dfdb" },
-    { name: "Orange", key: "orange", primary: "#ff5722", dark: "#bf360c", light: "#ffab91", bgTint: "#fbe9e7", link: "#e64a19", tableHeader: "#ff7043", footerText: "#ffccbc" },
-    { name: "Red", key: "red", primary: "#f44336", dark: "#b71c1c", light: "#ef9a9a", bgTint: "#ffebee", link: "#d32f2f", tableHeader: "#ef5350", footerText: "#ffcdd2" }
+    {
+      name: "Pink",
+      key: "pink",
+      primary: "#e91e63",
+      dark: "#880e4f",
+      light: "#f48fb1",
+      bgTint: "#fdf2f6",
+      link: "#c2185b",
+      tableHeader: "#ec407a",
+      footerText: "#fce4ec"
+    },
+    {
+      name: "Purple",
+      key: "purple",
+      primary: "#9c27b0",
+      dark: "#4a148c",
+      light: "#ce93d8",
+      bgTint: "#f3e5f5",
+      link: "#7b1fa2",
+      tableHeader: "#ab47bc",
+      footerText: "#e1bee7"
+    },
+    {
+      name: "Teal",
+      key: "teal",
+      primary: "#009688",
+      dark: "#004d40",
+      light: "#80cbc4",
+      bgTint: "#e0f2f1",
+      link: "#00796b",
+      tableHeader: "#26a69a",
+      footerText: "#b2dfdb"
+    },
+    {
+      name: "Orange",
+      key: "orange",
+      primary: "#ff5722",
+      dark: "#bf360c",
+      light: "#ffab91",
+      bgTint: "#fbe9e7",
+      link: "#e64a19",
+      tableHeader: "#ff7043",
+      footerText: "#ffccbc"
+    },
+    {
+      name: "Red",
+      key: "red",
+      primary: "#f44336",
+      dark: "#b71c1c",
+      light: "#ef9a9a",
+      bgTint: "#ffebee",
+      link: "#d32f2f",
+      tableHeader: "#ef5350",
+      footerText: "#ffcdd2"
+    }
   ];
   const DEFAULT_THEME = { enabled: false, color: "pink" };
   const THEME_CSS = `
@@ -1159,7 +1216,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       if (!token) {
         if (lastToken !== null) {
           lastToken = null;
-          logger.info("[interceptor-debug] checkToken: access token removed from sessionStorage (logout?)");
+          logger.info(
+            "[interceptor-debug] checkToken: access token removed from sessionStorage (logout?)"
+          );
         }
         return;
       }
@@ -1169,7 +1228,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       logger.info(`[interceptor-debug] checkToken: new token detected, parts=${parts.length}`);
       const jwt = decodeJwt(token);
       if (!jwt) {
-        logger.warn(`[interceptor-debug] checkToken: decode failed for token with ${parts.length} parts`);
+        logger.warn(
+          `[interceptor-debug] checkToken: decode failed for token with ${parts.length} parts`
+        );
         return;
       }
       logger.info(`[interceptor-debug] checkToken: decoded JWT, exp=${jwt.exp}`);
@@ -1178,16 +1239,16 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         logger.warn(`JWT exp claim is not a finite number (got ${jwt.exp}), skipping token`);
         return;
       }
-      const refreshExpiration = readSessionStorage(
-        SESSION_STORAGE_KEYS.refreshTokenExpiration
-      );
+      const refreshExpiration = readSessionStorage(SESSION_STORAGE_KEYS.refreshTokenExpiration);
       let refreshExpiresAt = 0;
       if (refreshExpiration) {
         const parsed = Date.parse(refreshExpiration);
         if (Number.isFinite(parsed)) {
           refreshExpiresAt = parsed;
         } else {
-          logger.warn(`[interceptor-debug] refresh_token_expiration is not a valid date: "${refreshExpiration}"`);
+          logger.warn(
+            `[interceptor-debug] refresh_token_expiration is not a valid date: "${refreshExpiration}"`
+          );
         }
       }
       logger.info(
@@ -1235,16 +1296,10 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   function safeLower(value) {
     return (value ?? "").toLowerCase();
   }
-  function isSupportedPortalPath(pathname) {
-    const path = safeLower(pathname);
-    return SUPPORTED_PORTAL_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+  function hasNeptunTitle(doc) {
+    return /\bneptun(?:\s+web|\.net)?\b/i.test(doc.title);
   }
-  function hasNeptunFingerprint(doc = document) {
-    const title = safeLower(doc.title);
-    if (title.includes("neptun")) return true;
-    const html = doc.documentElement;
-    const htmlText = safeLower(html?.textContent?.slice(0, 2e3));
-    if (htmlText.includes("neptun web") || htmlText.includes("neptun")) return true;
+  function hasNeptunAssetMarker(doc) {
     const attributedNodes = Array.from(
       doc.querySelectorAll("script[src], link[href], img[src], meta[content]")
     );
@@ -1254,17 +1309,36 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         "href" in node ? node.getAttribute("href") : null,
         node.getAttribute("content")
       ];
-      return values.some((value) => safeLower(value).includes("neptun"));
+      return values.some((value) => {
+        const marker = safeLower(value);
+        return marker.includes("neptun") || marker.includes("/hallgato");
+      });
     });
+  }
+  function hasNeptunAppShell(doc) {
+    return Boolean(
+      doc.querySelector(
+        ["app-root", "app-login", "app-footer", "app-header", "[data-neptun]", "[ng-version]"].join(
+          ","
+        )
+      )
+    );
+  }
+  function isSupportedPortalPath(pathname) {
+    const path = safeLower(pathname);
+    return SUPPORTED_PORTAL_PREFIXES.some(
+      (prefix) => path === prefix || path.startsWith(`${prefix}/`)
+    );
+  }
+  function hasNeptunFingerprint(doc = document) {
+    if (hasNeptunTitle(doc)) return true;
+    return hasNeptunAppShell(doc) && hasNeptunAssetMarker(doc);
   }
   function hasNeptunSessionStorage(storage = sessionStorage) {
     try {
-      return [
-        "access_token",
-        "refresh_token_expiration",
-        "login_type",
-        "tabId"
-      ].some((key) => storage.getItem(key) !== null);
+      return ["access_token", "refresh_token_expiration", "login_type", "tabId"].some(
+        (key) => storage.getItem(key) !== null
+      );
     } catch {
       return false;
     }
@@ -1921,16 +1995,8 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
   function normalizeButtonText$1(text) {
     return text.normalize("NFD").replace(new RegExp("\\p{Diacritic}", "gu"), "").replace(/\s+/g, " ").trim().toLowerCase();
   }
-  const SEARCH_BUTTON_PATTERNS = [
-    "targy keres",
-    "search subject",
-    "subject search"
-  ];
-  const ENROLL_BUTTON_PATTERNS = [
-    "targy felvetele",
-    "take subject",
-    "enroll subject"
-  ];
+  const SEARCH_BUTTON_PATTERNS = ["targy keres", "search subject", "subject search"];
+  const ENROLL_BUTTON_PATTERNS = ["targy felvetele", "take subject", "enroll subject"];
   function sanitizeText(text, maxLen = 60) {
     return text.replace(/\s+/g, " ").trim().slice(0, maxLen);
   }
@@ -2066,7 +2132,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     const headerText = panel.querySelector("mat-expansion-panel-header")?.textContent ?? panel.querySelector(".mat-expansion-panel-header")?.textContent ?? panel.textContent ?? "";
     const code = extractSubjectCodeFromText(headerText);
     if (!code) {
-      api2?.logger.info(`[dom-debug] extractSubjectCode: no code found, header starts with "${headerText.substring(0, 50)}"`);
+      api2?.logger.info(
+        `[dom-debug] extractSubjectCode: no code found, header starts with "${headerText.substring(0, 50)}"`
+      );
     }
     return code;
   }
@@ -2094,7 +2162,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         for (const value of values) {
           const code = extractCourseCodeFromExactCandidate(value) ?? extractCourseCodeFromText(value);
           if (code) {
-            api2?.logger.info(`[dom-debug] extractCourseCode: selector "${selector}" matched="${code}"`);
+            api2?.logger.info(
+              `[dom-debug] extractCourseCode: selector "${selector}" matched="${code}"`
+            );
             return code;
           }
         }
@@ -2119,7 +2189,9 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       api2?.logger.info(`[dom-debug] extractCourseCode: after course-code label matched="${code}"`);
       return code;
     }
-    api2?.logger.warn(`[dom-debug] extractCourseCode: no course code found, text starts with "${text.substring(0, 50)}"`);
+    api2?.logger.warn(
+      `[dom-debug] extractCourseCode: no course code found, text starts with "${text.substring(0, 50)}"`
+    );
     return null;
   }
   function getSubjectPanels() {
@@ -2137,13 +2209,17 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       timeoutMs: AUTO_SEARCH_TIMEOUT_MS
     });
     if (existingPanels > 0) {
-      api2?.logger.info(`[dom-debug] autoSearchSubjects: skipping, ${existingPanels} subjects already listed`);
+      api2?.logger.info(
+        `[dom-debug] autoSearchSubjects: skipping, ${existingPanels} subjects already listed`
+      );
       return {
         clickedSearchButton: false,
         searchStartedAtMs: null
       };
     }
-    api2?.logger.info("[dom-debug] autoSearchSubjects: no subjects listed, waiting for search button...");
+    api2?.logger.info(
+      "[dom-debug] autoSearchSubjects: no subjects listed, waiting for search button..."
+    );
     const observerTarget = document.body ?? document.documentElement;
     let mutationCount = 0;
     let lastMutationAt = Date.now();
@@ -2180,11 +2256,14 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       const panels = getSubjectPanels().length;
       if (panels > 0) {
         observer?.disconnect();
-        api2?.logger.info("[dom-debug] autoSearchSubjects: subjects appeared before auto-click was needed", {
-          elapsedMs: Date.now() - start,
-          panels,
-          mutations: mutationCount
-        });
+        api2?.logger.info(
+          "[dom-debug] autoSearchSubjects: subjects appeared before auto-click was needed",
+          {
+            elapsedMs: Date.now() - start,
+            panels,
+            mutations: mutationCount
+          }
+        );
         return {
           clickedSearchButton: false,
           searchStartedAtMs: null
@@ -2227,11 +2306,14 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       await delay(AUTO_SEARCH_POLL_MS);
     }
     observer?.disconnect();
-    api2?.logger.warn(`[dom-debug] autoSearchSubjects: search button not found within ${AUTO_SEARCH_TIMEOUT_MS}ms`, {
-      elapsedMs: Date.now() - start,
-      mutations: mutationCount,
-      snapshot: getAutoSearchSnapshot()
-    });
+    api2?.logger.warn(
+      `[dom-debug] autoSearchSubjects: search button not found within ${AUTO_SEARCH_TIMEOUT_MS}ms`,
+      {
+        elapsedMs: Date.now() - start,
+        mutations: mutationCount,
+        snapshot: getAutoSearchSnapshot()
+      }
+    );
     return {
       clickedSearchButton: false,
       searchStartedAtMs: null
@@ -2371,14 +2453,17 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
         const interactable = searchBtn ? isButtonInteractable$1(searchBtn) : false;
         if (idleMs >= AUTO_SEARCH_STABLE_MS && requestSettledForMs >= SEARCH_RESULT_SETTLE_GRACE_MS && (interactable || searchBtn === null)) {
           observer?.disconnect();
-          api2?.logger.info("[dom-debug] waitForSubjectListing: search settled without subject panels", {
-            elapsedMs: Date.now() - start,
-            idleMs,
-            requestSettledForMs,
-            mutations: mutationCount,
-            request: describeRequestResult(requestTracker.current),
-            button: describeButton(searchBtn)
-          });
+          api2?.logger.info(
+            "[dom-debug] waitForSubjectListing: search settled without subject panels",
+            {
+              elapsedMs: Date.now() - start,
+              idleMs,
+              requestSettledForMs,
+              mutations: mutationCount,
+              request: describeRequestResult(requestTracker.current),
+              button: describeButton(searchBtn)
+            }
+          );
           return {
             state: "request-completed-no-panels",
             panels: 0,
@@ -2406,7 +2491,8 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     if (panel.classList.contains("mat-expanded")) return true;
     if (panel.getAttribute("ng-reflect-expanded") === "true") return true;
     if (panel.querySelectorAll(".course-list-item-container").length > 0) return true;
-    if (panel.querySelector('.mat-expansion-panel-content[style*="visibility: visible"]') !== null) return true;
+    if (panel.querySelector('.mat-expansion-panel-content[style*="visibility: visible"]') !== null)
+      return true;
     const header = panel.querySelector("mat-expansion-panel-header");
     if (header?.getAttribute("aria-expanded") === "true") return true;
     return false;
@@ -3961,33 +4047,14 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
       return;
     }
     logger.info("Neptun PowerUp! v3 starting...");
-    let gmStorage;
-    try {
-      const testGm = typeof GM !== "undefined" && GM.getValue;
-      if (!testGm) throw new Error("GM API not available");
-      gmStorage = {
-        getValue: (key, defaultVal) => GM.getValue(key, defaultVal),
-        setValue: (key, value) => GM.setValue(key, value)
-      };
-    } catch (err) {
-      logger.warn("GM API unavailable, falling back to localStorage:", err);
-      gmStorage = {
-        getValue: async (key, defaultVal) => {
-          try {
-            return localStorage.getItem(`npu_${key}`) ?? defaultVal;
-          } catch {
-            return defaultVal;
-          }
-        },
-        setValue: async (key, value) => {
-          try {
-            localStorage.setItem(`npu_${key}`, value);
-          } catch (storageErr) {
-            logger.error("localStorage.setItem failed:", storageErr);
-          }
-        }
-      };
+    if (typeof GM === "undefined" || typeof GM.getValue !== "function" || typeof GM.setValue !== "function") {
+      logger.error("Tampermonkey GM storage API is unavailable; NPU will not activate.");
+      return;
     }
+    const gmStorage = {
+      getValue: (key, defaultVal) => GM.getValue(key, defaultVal),
+      setValue: (key, value) => GM.setValue(key, value)
+    };
     const domain = extractDomain(window.location.href);
     function buildContext() {
       return {

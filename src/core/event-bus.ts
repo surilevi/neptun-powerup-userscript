@@ -43,12 +43,20 @@ export function createEventBus(): EventBus {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function emit(event: string, payload: any): void {
     handlers.get(event)?.forEach((h) => {
-      try { h(payload) } catch (err) { console.error('[NPU:event-bus] handler error:', err) }
+      try {
+        h(payload)
+      } catch (err) {
+        console.error('[NPU:event-bus] handler error:', err)
+      }
     })
 
     const ns = event.split(':')[0]
     wildcards.get(ns)?.forEach((h) => {
-      try { h(payload) } catch (err) { console.error('[NPU:event-bus] wildcard handler error:', err) }
+      try {
+        h(payload)
+      } catch (err) {
+        console.error('[NPU:event-bus] wildcard handler error:', err)
+      }
     })
   }
 

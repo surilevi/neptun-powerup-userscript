@@ -1,0 +1,74 @@
+name: Bug report
+description: Report something that is broken or unreliable.
+title: '[Bug]: '
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Please avoid sharing personal data, screenshots with names, Neptun codes, or login details.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the visible behavior and what you expected instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: feature
+    attributes:
+      label: Affected feature
+      options:
+        - Course Store
+        - Course Rush
+        - Exam Quick Signup
+        - Exam Rush
+        - Infinite Session
+        - Theme
+        - Installation or update
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Userscript version
+      description: You can find this in Tampermonkey or the NPU consent/settings panel.
+      placeholder: 3.1.3
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and userscript manager
+      placeholder: Chrome 125 + Tampermonkey 5.x
+  - type: input
+    id: portal-path
+    attributes:
+      label: Neptun path
+      description: Share only the path, not the host or query parameters, if privacy matters.
+      placeholder: /hallgatoi/subjects/registration
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console logs
+      description: Optional. Enable debug with `localStorage.npu_debug = 'true'`, reload, reproduce, then paste only NPU logs.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed personal data, Neptun identifiers, and screenshots with private details.
+          required: true
+        - label: I checked whether the latest `dist/npu.user.js` build has the same issue.
+          required: true

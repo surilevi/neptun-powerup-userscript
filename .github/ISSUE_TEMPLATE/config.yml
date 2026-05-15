@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Legal and acceptable-use questions
+    url: https://github.com/surilevi/neptun-powerup-userscript/blob/main/LEGAL_NOTICE.md
+    about: Read the project legal notice before asking whether a use case is allowed.

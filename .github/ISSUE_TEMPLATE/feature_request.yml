@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a small, practical improvement.
+title: '[Feature]: '
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow
+      description: What Neptun task would this make less repetitive or less error-prone?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe what the userscript should do.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Feature area
+      options:
+        - Course workflows
+        - Exam workflows
+        - Session handling
+        - Theme or UI
+        - Installation or docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints or risks
+      description: Mention any university rules, Neptun UI differences, or privacy concerns that matter.

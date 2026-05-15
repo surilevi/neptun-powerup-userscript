@@ -88,9 +88,7 @@ describe('ModuleRegistry', () => {
     registry.register(mod)
     await registry.activateAll(defaultContext)
 
-    expect(errorHandler).toHaveBeenCalledWith(
-      expect.objectContaining({ moduleId: 'test-module' }),
-    )
+    expect(errorHandler).toHaveBeenCalledWith(expect.objectContaining({ moduleId: 'test-module' }))
   })
 
   it('should not block other modules when one throws', async () => {

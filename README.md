@@ -1,5 +1,8 @@
 # Neptun PowerUp!
 
+[![CI](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/ci.yml/badge.svg)](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/codeql.yml/badge.svg)](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/codeql.yml)
+
 A Tampermonkey userscript for Neptun student portals.
 
 Hungarian documentation: [README.hu.md](README.hu.md)
@@ -58,7 +61,7 @@ For verbose debug logs, run `localStorage.npu_debug = 'true'` in the browser con
 
 ## Privacy
 
-The script stores its own settings and saved selections in Tampermonkey storage. It does not save usernames or passwords.
+The script stores its own settings and saved selections in Tampermonkey storage. It does not save usernames or passwords. If Tampermonkey's storage API is unavailable, NPU does not activate.
 
 ## Legal
 

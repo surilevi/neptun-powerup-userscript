@@ -1,0 +1,45 @@
+name: Neptun compatibility report
+description: Report a university portal path or UI variant that needs selector tuning.
+title: '[Compatibility]: '
+labels:
+  - compatibility
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not include private hostnames, screenshots with names, Neptun codes, or account details.
+  - type: input
+    id: path
+    attributes:
+      label: Portal path
+      placeholder: /hallgato_ng/exams/overview/registration
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Broken area
+      options:
+        - Portal detection
+        - Subject search
+        - Course code detection
+        - Course enroll button
+        - Exam subject detection
+        - Exam enroll button
+        - Session keep-alive
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What looks different?
+      description: Describe labels, button text, table columns, or DOM differences if you inspected them.
+    validations:
+      required: true
+  - type: textarea
+    id: safe-html
+    attributes:
+      label: Sanitized DOM snippet
+      description: Optional. Paste a small sanitized snippet if it helps identify selectors.
+      render: html

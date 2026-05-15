@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModuleApi } from '../../src/types/modules'
-import { addSaveButtonsToRows, getExamRows, getRowSubjectCode, getSubjectCode, parseExamRow } from '../../src/modules/exam-signup/dom'
+import {
+  addSaveButtonsToRows,
+  getExamRows,
+  getRowSubjectCode,
+  getSubjectCode,
+  parseExamRow,
+} from '../../src/modules/exam-signup/dom'
 import { setApi, setCachedSubjectCode } from '../../src/modules/exam-signup/state'
 
 function createMockApi(): ModuleApi {
@@ -251,7 +257,9 @@ describe('exam-signup table parsing', () => {
     const onSave = vi.fn()
     addSaveButtonsToRows(null, onSave)
 
-    const saveButtons = Array.from(document.querySelectorAll('.npu-exam-save-btn')) as HTMLButtonElement[]
+    const saveButtons = Array.from(
+      document.querySelectorAll('.npu-exam-save-btn'),
+    ) as HTMLButtonElement[]
     expect(saveButtons).toHaveLength(2)
     expect(document.querySelectorAll('.npu-exam-save-slot')).toHaveLength(2)
     expect(saveButtons[1].closest('td')?.textContent).toContain('2026. junius 9. 8:00')
@@ -286,11 +294,18 @@ describe('exam-signup table parsing', () => {
     addSaveButtonsToRows(null, onSave)
     const rows = getExamRows()
 
-    const saveButtons = Array.from(document.querySelectorAll('.npu-exam-save-btn')) as HTMLButtonElement[]
+    const saveButtons = Array.from(
+      document.querySelectorAll('.npu-exam-save-btn'),
+    ) as HTMLButtonElement[]
     expect(saveButtons).toHaveLength(1)
 
     saveButtons[0].click()
-    expect(onSave).toHaveBeenCalledWith('BMEVITMAD01', '2026. junius 5. 10:00', 'Jelentkezteto', 'E1')
+    expect(onSave).toHaveBeenCalledWith(
+      'BMEVITMAD01',
+      '2026. junius 5. 10:00',
+      'Jelentkezteto',
+      'E1',
+    )
     expect(getRowSubjectCode(rows[0])).toBe('BMEVITMAD01')
   })
 })

@@ -19,17 +19,9 @@ function normalizeButtonText(text: string): string {
     .toLowerCase()
 }
 
-const SEARCH_BUTTON_PATTERNS = [
-  'targy keres',
-  'search subject',
-  'subject search',
-]
+const SEARCH_BUTTON_PATTERNS = ['targy keres', 'search subject', 'subject search']
 
-const ENROLL_BUTTON_PATTERNS = [
-  'targy felvetele',
-  'take subject',
-  'enroll subject',
-]
+const ENROLL_BUTTON_PATTERNS = ['targy felvetele', 'take subject', 'enroll subject']
 
 function sanitizeText(text: string, maxLen: number = 60): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, maxLen)
@@ -51,7 +43,10 @@ const COURSE_CODE_STOP_WORDS = [
   'TIPUS',
 ]
 
-function isCourseCodeToken(token: string, { allowShortAlpha = false }: { allowShortAlpha?: boolean } = {}): boolean {
+function isCourseCodeToken(
+  token: string,
+  { allowShortAlpha = false }: { allowShortAlpha?: boolean } = {},
+): boolean {
   const normalized = normalizeCourseCode(token)
   const minLength = allowShortAlpha ? 1 : 2
   if (normalized.length < minLength || normalized.length > 20) return false
@@ -228,7 +223,9 @@ export function extractSubjectCode(panel: Element): string | null {
     ''
   const code = extractSubjectCodeFromText(headerText)
   if (!code) {
-    api?.logger.info(`[dom-debug] extractSubjectCode: no code found, header starts with "${headerText.substring(0, 50)}"`)
+    api?.logger.info(
+      `[dom-debug] extractSubjectCode: no code found, header starts with "${headerText.substring(0, 50)}"`,
+    )
   }
   return code
 }
@@ -265,7 +262,9 @@ export function extractCourseCode(courseItem: Element): string | null {
       for (const value of values) {
         const code = extractCourseCodeFromExactCandidate(value) ?? extractCourseCodeFromText(value)
         if (code) {
-          api?.logger.info(`[dom-debug] extractCourseCode: selector "${selector}" matched="${code}"`)
+          api?.logger.info(
+            `[dom-debug] extractCourseCode: selector "${selector}" matched="${code}"`,
+          )
           return code
         }
       }
@@ -273,7 +272,8 @@ export function extractCourseCode(courseItem: Element): string | null {
   }
 
   for (const candidate of getTextNodeCandidates(courseItem)) {
-    const code = extractCourseCodeFromExactCandidate(candidate) ?? extractCourseCodeFromText(candidate)
+    const code =
+      extractCourseCodeFromExactCandidate(candidate) ?? extractCourseCodeFromText(candidate)
     if (code) {
       api?.logger.info(`[dom-debug] extractCourseCode: text node matched="${code}"`)
       return code
@@ -294,7 +294,9 @@ export function extractCourseCode(courseItem: Element): string | null {
     return code
   }
 
-  api?.logger.warn(`[dom-debug] extractCourseCode: no course code found, text starts with "${text.substring(0, 50)}"`)
+  api?.logger.warn(
+    `[dom-debug] extractCourseCode: no course code found, text starts with "${text.substring(0, 50)}"`,
+  )
   return null
 }
 
@@ -324,14 +326,18 @@ export async function autoSearchSubjects(): Promise<AutoSearchSubjectsResult> {
   })
 
   if (existingPanels > 0) {
-    api?.logger.info(`[dom-debug] autoSearchSubjects: skipping, ${existingPanels} subjects already listed`)
+    api?.logger.info(
+      `[dom-debug] autoSearchSubjects: skipping, ${existingPanels} subjects already listed`,
+    )
     return {
       clickedSearchButton: false,
       searchStartedAtMs: null,
     }
   }
 
-  api?.logger.info('[dom-debug] autoSearchSubjects: no subjects listed, waiting for search button...')
+  api?.logger.info(
+    '[dom-debug] autoSearchSubjects: no subjects listed, waiting for search button...',
+  )
 
   const observerTarget = document.body ?? document.documentElement
   let mutationCount = 0
@@ -342,22 +348,22 @@ export async function autoSearchSubjects(): Promise<AutoSearchSubjectsResult> {
 
   const observer = observerTarget
     ? new MutationObserver((mutations) => {
-      mutationCount += mutations.length
-      lastMutationAt = Date.now()
+        mutationCount += mutations.length
+        lastMutationAt = Date.now()
 
-      const buttonCount = document.querySelectorAll('button').length
-      const panelCount = getSubjectPanels().length
-      if (buttonCount !== lastButtonCount || panelCount !== lastPanelCount) {
-        lastButtonCount = buttonCount
-        lastPanelCount = panelCount
-        api?.logger.info('[dom-debug] autoSearchSubjects: DOM changed while waiting', {
-          elapsedMs: Date.now() - start,
-          readyState: document.readyState,
-          panels: panelCount,
-          buttons: buttonCount,
-        })
-      }
-    })
+        const buttonCount = document.querySelectorAll('button').length
+        const panelCount = getSubjectPanels().length
+        if (buttonCount !== lastButtonCount || panelCount !== lastPanelCount) {
+          lastButtonCount = buttonCount
+          lastPanelCount = panelCount
+          api?.logger.info('[dom-debug] autoSearchSubjects: DOM changed while waiting', {
+            elapsedMs: Date.now() - start,
+            readyState: document.readyState,
+            panels: panelCount,
+            buttons: buttonCount,
+          })
+        }
+      })
     : null
 
   try {
@@ -375,11 +381,14 @@ export async function autoSearchSubjects(): Promise<AutoSearchSubjectsResult> {
     const panels = getSubjectPanels().length
     if (panels > 0) {
       observer?.disconnect()
-      api?.logger.info('[dom-debug] autoSearchSubjects: subjects appeared before auto-click was needed', {
-        elapsedMs: Date.now() - start,
-        panels,
-        mutations: mutationCount,
-      })
+      api?.logger.info(
+        '[dom-debug] autoSearchSubjects: subjects appeared before auto-click was needed',
+        {
+          elapsedMs: Date.now() - start,
+          panels,
+          mutations: mutationCount,
+        },
+      )
       return {
         clickedSearchButton: false,
         searchStartedAtMs: null,
@@ -427,24 +436,25 @@ export async function autoSearchSubjects(): Promise<AutoSearchSubjectsResult> {
   }
 
   observer?.disconnect()
-  api?.logger.warn(`[dom-debug] autoSearchSubjects: search button not found within ${AUTO_SEARCH_TIMEOUT_MS}ms`, {
-    elapsedMs: Date.now() - start,
-    mutations: mutationCount,
-    snapshot: getAutoSearchSnapshot(),
-  })
+  api?.logger.warn(
+    `[dom-debug] autoSearchSubjects: search button not found within ${AUTO_SEARCH_TIMEOUT_MS}ms`,
+    {
+      elapsedMs: Date.now() - start,
+      mutations: mutationCount,
+      snapshot: getAutoSearchSnapshot(),
+    },
+  )
   return {
     clickedSearchButton: false,
     searchStartedAtMs: null,
   }
 }
 
-export async function waitForSubjectListing(
-  {
-    timeoutMs = 60_000,
-    searchStartedAtMs = performance.now(),
-    allowAutoClick = false,
-  }: SubjectListingWaitOptions = {},
-): Promise<SubjectListingWaitResult> {
+export async function waitForSubjectListing({
+  timeoutMs = 60_000,
+  searchStartedAtMs = performance.now(),
+  allowAutoClick = false,
+}: SubjectListingWaitOptions = {}): Promise<SubjectListingWaitResult> {
   const api = getApi()
   const start = Date.now()
   const initialPanels = getSubjectPanels().length
@@ -472,16 +482,19 @@ export async function waitForSubjectListing(
     timeoutMs,
     searchStartedAtMs,
   )
-  const requestTracker: { current: RequestCompletionResult | null; completedAtMs: number | null } = {
-    current: null,
-    completedAtMs: null,
-  }
-  requestPromise.then((result) => {
-    requestTracker.current = result
-    requestTracker.completedAtMs = Date.now()
-  }).catch((err) => {
-    api?.logger.warn('[dom-debug] waitForSubjectListing: request observer failed', err)
-  })
+  const requestTracker: { current: RequestCompletionResult | null; completedAtMs: number | null } =
+    {
+      current: null,
+      completedAtMs: null,
+    }
+  requestPromise
+    .then((result) => {
+      requestTracker.current = result
+      requestTracker.completedAtMs = Date.now()
+    })
+    .catch((err) => {
+      api?.logger.warn('[dom-debug] waitForSubjectListing: request observer failed', err)
+    })
 
   const observerTarget = document.body ?? document.documentElement
   let mutationCount = 0
@@ -492,18 +505,18 @@ export async function waitForSubjectListing(
 
   const observer = observerTarget
     ? new MutationObserver((mutations) => {
-      mutationCount += mutations.length
-      lastMutationAt = Date.now()
+        mutationCount += mutations.length
+        lastMutationAt = Date.now()
 
-      const panelCount = getSubjectPanels().length
-      if (panelCount !== lastPanelCount) {
-        lastPanelCount = panelCount
-        api?.logger.info('[dom-debug] waitForSubjectListing: panel count changed', {
-          elapsedMs: Date.now() - start,
-          panels: panelCount,
-        })
-      }
-    })
+        const panelCount = getSubjectPanels().length
+        if (panelCount !== lastPanelCount) {
+          lastPanelCount = panelCount
+          api?.logger.info('[dom-debug] waitForSubjectListing: panel count changed', {
+            elapsedMs: Date.now() - start,
+            panels: panelCount,
+          })
+        }
+      })
     : null
 
   try {
@@ -553,7 +566,12 @@ export async function waitForSubjectListing(
         })
       }
 
-      if (allowAutoClick && !delayedAutoClickTriggered && interactable && idleMs >= AUTO_SEARCH_STABLE_MS) {
+      if (
+        allowAutoClick &&
+        !delayedAutoClickTriggered &&
+        interactable &&
+        idleMs >= AUTO_SEARCH_STABLE_MS
+      ) {
         delayedAutoClickTriggered = true
         searchBtn.click()
         api?.logger.info('[dom-debug] waitForSubjectListing: auto-clicked delayed search button', {
@@ -568,9 +586,8 @@ export async function waitForSubjectListing(
     }
 
     const settledRequest = requestTracker.current
-    const requestSettledForMs = requestTracker.completedAtMs === null
-      ? 0
-      : Date.now() - requestTracker.completedAtMs
+    const requestSettledForMs =
+      requestTracker.completedAtMs === null ? 0 : Date.now() - requestTracker.completedAtMs
     if (settledRequest !== null && settledRequest.completed) {
       if (
         settledRequest.status !== null &&
@@ -600,14 +617,17 @@ export async function waitForSubjectListing(
         (interactable || searchBtn === null)
       ) {
         observer?.disconnect()
-        api?.logger.info('[dom-debug] waitForSubjectListing: search settled without subject panels', {
-          elapsedMs: Date.now() - start,
-          idleMs,
-          requestSettledForMs,
-          mutations: mutationCount,
-          request: describeRequestResult(requestTracker.current),
-          button: describeButton(searchBtn),
-        })
+        api?.logger.info(
+          '[dom-debug] waitForSubjectListing: search settled without subject panels',
+          {
+            elapsedMs: Date.now() - start,
+            idleMs,
+            requestSettledForMs,
+            mutations: mutationCount,
+            request: describeRequestResult(requestTracker.current),
+            button: describeButton(searchBtn),
+          },
+        )
         return {
           state: 'request-completed-no-panels',
           panels: 0,
@@ -642,7 +662,8 @@ export function isPanelExpanded(panel: Element): boolean {
   if (panel.classList.contains('mat-expanded')) return true
   if (panel.getAttribute('ng-reflect-expanded') === 'true') return true
   if (panel.querySelectorAll('.course-list-item-container').length > 0) return true
-  if (panel.querySelector('.mat-expansion-panel-content[style*="visibility: visible"]') !== null) return true
+  if (panel.querySelector('.mat-expansion-panel-content[style*="visibility: visible"]') !== null)
+    return true
   const header = panel.querySelector('mat-expansion-panel-header')
   if (header?.getAttribute('aria-expanded') === 'true') return true
   return false

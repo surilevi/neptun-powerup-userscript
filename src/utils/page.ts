@@ -6,10 +6,7 @@ export function extractPath(url: string): string {
   return parsed.pathname
 }
 
-const AUTH_PATTERNS = [
-  KNOWN_ENDPOINTS.authenticate,
-  KNOWN_ENDPOINTS.getNewTokens,
-]
+const AUTH_PATTERNS = [KNOWN_ENDPOINTS.authenticate, KNOWN_ENDPOINTS.getNewTokens]
 
 export function isAuthEndpoint(url: string): boolean {
   const path = extractPath(url).toLowerCase()
