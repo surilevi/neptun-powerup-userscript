@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neptun PowerUp!
 // @namespace    npu
-// @version      3.1.3
+// @version      3.1.4
 // @author       surilevi
 // @description  Neptun helper userscript for course and exam workflows
 // @license      MIT
@@ -3815,7 +3815,7 @@ schedulableSubjects: "SubjectApplication/SchedulableSubjects"
     );
     return false;
   }
-  const EXAM_UI_BUILD = "3.1.3 fast-confirm-a";
+  const EXAM_UI_BUILD = "3.1.4 slow-network-a";
   async function savePreferredExam(subjectCode, date, type, courseCode) {
     const api2 = getApi();
     const prefs = await loadPreferences();
