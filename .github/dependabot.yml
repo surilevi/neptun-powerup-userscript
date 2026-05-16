@@ -23,6 +23,9 @@ updates:
           - vite
           - vite-plugin-monkey
           - vitest
+        update-types:
+          - minor
+          - patch
       test-environment:
         patterns:
           - jsdom
