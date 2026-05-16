@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neptun PowerUp!
 // @namespace    npu
-// @version      3.1.4
+// @version      3.1.5
 // @author       surilevi
 // @description  Neptun helper userscript for course and exam workflows
 // @license      MIT
@@ -3489,7 +3489,7 @@ mat-expansion-panel {
 		api?.logger.warn(`[exam-enroll-debug] waitForExamTable: timed out after ${pollCount} polls (${timeoutMs}ms, mutations=${mutationCount})`);
 		return false;
 	}
-	var EXAM_UI_BUILD = "3.1.4 slow-network-a";
+	var EXAM_UI_BUILD = "3.1.5 tooling-v8-a";
 	async function savePreferredExam(subjectCode, date, type, courseCode) {
 		const api = getApi();
 		const prefs = await loadPreferences();
