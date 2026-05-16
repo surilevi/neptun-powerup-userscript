@@ -15,6 +15,9 @@ import { waitForExamTable, autoEnrollSaved } from './enroll'
 import { renderModuleUI } from './ui'
 import { delay } from '../../utils/async'
 
+const EXAM_TABLE_WAIT_MS = 30_000
+const EXAM_RUSH_SETTLE_MS = 2_000
+
 export const examSignupModule: NpuModule = {
   id: 'exam-signup',
   name: 'Exam Quick Signup',
@@ -30,9 +33,13 @@ export const examSignupModule: NpuModule = {
     setIsEnrollmentInProgress(false)
     const api = moduleApi
 
-    const tableReady = await waitForExamTable(5000)
+    const tableReady = await waitForExamTable(EXAM_TABLE_WAIT_MS)
     if (!tableReady) {
-      api.logger.warn('exam table not found after 5s')
+      api.logger.warn(`exam table not found after ${EXAM_TABLE_WAIT_MS / 1000}s`)
+      api.statusPanel.addMessage(
+        'warn',
+        'Exam table did not load yet. Refresh after Neptun finishes loading.',
+      )
       return
     }
 
@@ -50,7 +57,7 @@ export const examSignupModule: NpuModule = {
     if (rushOn) {
       api.logger.info('Exam Rush Mode active - scanning visible exam tables for saved targets')
       api.statusPanel.addMessage('info', 'Scanning visible exam tables...')
-      await delay(1000)
+      await delay(EXAM_RUSH_SETTLE_MS)
       autoEnrollSaved().catch((err) => api.logger.error('rush exam auto-enroll failed:', err))
     }
 

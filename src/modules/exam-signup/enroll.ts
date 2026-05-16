@@ -28,8 +28,11 @@ interface EnrollmentAttemptResult {
   shouldStop: boolean
 }
 
-const CONFIRM_BUTTON_WAIT_MS = 1500
+const CONFIRM_BUTTON_WAIT_MS = 5000
 const CONFIRM_BUTTON_POLL_MS = 50
+const EXAM_TABLE_WAIT_POLL_MS = 300
+const SAVED_TARGET_WAIT_MS = 15_000
+const SAVED_TARGET_POLL_MS = 300
 
 function isCurrentEnrollmentRun(apiRef: ReturnType<typeof getApi>): boolean {
   return !getIsDisposed() && getApi() === apiRef
@@ -81,6 +84,43 @@ function findSavedExamTargets(prefs: ExamPreferences): SavedExamTarget[] {
   }
 
   return targets
+}
+
+async function waitForSavedExamTargets(
+  prefs: ExamPreferences,
+  timeoutMs: number = SAVED_TARGET_WAIT_MS,
+): Promise<SavedExamTarget[]> {
+  const api = getApi()
+  const start = Date.now()
+  let pollCount = 0
+
+  while (Date.now() - start < timeoutMs) {
+    if (getIsDisposed()) return []
+
+    const targets = findSavedExamTargets(prefs)
+    if (targets.length > 0) {
+      api?.logger.info(
+        `[exam-enroll-debug] waitForSavedExamTargets: found ${targets.length} target(s) after ${pollCount} polls (${Date.now() - start}ms)`,
+      )
+      return targets
+    }
+
+    pollCount++
+    await delay(SAVED_TARGET_POLL_MS)
+  }
+
+  const targets = findSavedExamTargets(prefs)
+  if (targets.length > 0) {
+    api?.logger.info(
+      `[exam-enroll-debug] waitForSavedExamTargets: found ${targets.length} target(s) on final check (${Date.now() - start}ms)`,
+    )
+    return targets
+  }
+
+  api?.logger.info(
+    `[exam-enroll-debug] waitForSavedExamTargets: no saved targets after ${pollCount} polls (${timeoutMs}ms)`,
+  )
+  return []
 }
 
 function hasSessionToken(): boolean {
@@ -330,10 +370,19 @@ export async function autoEnrollSaved(): Promise<void> {
     }
 
     const pageSubjectCode = getSubjectCode()
-    const targets = findSavedExamTargets(prefs)
+    let targets = findSavedExamTargets(prefs)
     api?.logger.info(
       `[exam-enroll-debug] autoEnrollSaved: found ${targets.length} saved targets on the current page`,
     )
+
+    const mayStillRenderSavedTarget =
+      Object.keys(prefs).length > 0 && (pageSubjectCode === null || Boolean(prefs[pageSubjectCode]))
+
+    if (targets.length === 0 && mayStillRenderSavedTarget) {
+      api?.statusPanel.addMessage('info', 'Waiting for saved exam rows to finish loading...')
+      targets = await waitForSavedExamTargets(prefs)
+      if (!isCurrentEnrollmentRun(api)) return
+    }
 
     if (targets.length === 0) {
       if (pageSubjectCode && prefs[pageSubjectCode]) {
@@ -439,20 +488,52 @@ export async function waitForExamTable(timeoutMs: number): Promise<boolean> {
   const api = getApi()
   const start = Date.now()
   let pollCount = 0
+  let observer: MutationObserver | null = null
+  let mutationCount = 0
+
+  function hasRows(): boolean {
+    return getExamRows().length > 0
+  }
+
   api?.logger.info(`[exam-enroll-debug] waitForExamTable: starting poll, timeout=${timeoutMs}ms`)
+
+  const observerTarget = document.querySelector('main') ?? document.body ?? document.documentElement
+  if (observerTarget) {
+    try {
+      observer = new MutationObserver((mutations) => {
+        mutationCount += mutations.length
+      })
+      observer.observe(observerTarget, { childList: true, subtree: true })
+    } catch (err) {
+      api?.logger.warn('[exam-enroll-debug] waitForExamTable: failed to observe DOM changes', err)
+    }
+  }
+
   while (Date.now() - start < timeoutMs) {
-    const rowCount = getExamRows().length
-    if (rowCount > 0) {
+    if (hasRows()) {
+      const rowCount = getExamRows().length
+      observer?.disconnect()
       api?.logger.info(
-        `[exam-enroll-debug] waitForExamTable: found ${rowCount} rows after ${pollCount} polls (${Date.now() - start}ms)`,
+        `[exam-enroll-debug] waitForExamTable: found ${rowCount} rows after ${pollCount} polls (${Date.now() - start}ms, mutations=${mutationCount})`,
       )
       return true
     }
     pollCount++
-    await delay(300)
+    await delay(EXAM_TABLE_WAIT_POLL_MS)
   }
+
+  if (hasRows()) {
+    const rowCount = getExamRows().length
+    observer?.disconnect()
+    api?.logger.info(
+      `[exam-enroll-debug] waitForExamTable: found ${rowCount} rows on final check (${Date.now() - start}ms, mutations=${mutationCount})`,
+    )
+    return true
+  }
+
+  observer?.disconnect()
   api?.logger.warn(
-    `[exam-enroll-debug] waitForExamTable: timed out after ${pollCount} polls (${timeoutMs}ms)`,
+    `[exam-enroll-debug] waitForExamTable: timed out after ${pollCount} polls (${timeoutMs}ms, mutations=${mutationCount})`,
   )
   return false
 }
