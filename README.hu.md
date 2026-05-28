@@ -1,5 +1,11 @@
 # Neptun PowerUp!
 
+[![CI](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/ci.yml/badge.svg)](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/codeql.yml/badge.svg)](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/codeql.yml)
+[![Version](https://img.shields.io/github/package-json/v/surilevi/neptun-powerup-userscript?label=version)](https://github.com/surilevi/neptun-powerup-userscript/raw/main/dist/npu.user.js)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178c6.svg)](https://www.typescriptlang.org/)
+
 Magyar nyelvű Tampermonkey userscript Neptunhoz. A célja egyszerű: kevesebb ismétlődő kattintás, kevesebb kapkodás tárgyfelvételkor és vizsgajelentkezéskor.
 
 A script nem helyetted dönt, és nem kerül meg Neptun-szabályokat. A már kiválasztott kurzusokat és vizsgaidőpontokat tudja elmenteni, visszatölteni, majd kérésre végigkattintani. Emellett normál használat közben próbálja életben tartani az aktív munkamenetet, de nagy terhelésű tárgyfelvételi vagy vizsgajelentkezési időszakban ezt nem lehet garantálni.
