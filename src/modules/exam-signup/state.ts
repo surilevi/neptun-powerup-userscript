@@ -8,6 +8,8 @@ export interface ExamPreferences {
   }
 }
 
+export type ExamRegistrationState = 'registered' | 'available' | 'full' | 'waitlistOnly' | 'unknown'
+
 export interface ExamRowInfo {
   row: HTMLTableRowElement
   date: string
@@ -15,6 +17,7 @@ export interface ExamRowInfo {
   capacity: string
   instructor: string
   courseCode: string
+  registrationState: ExamRegistrationState
   felvetelBtn: HTMLButtonElement | null
 }
 

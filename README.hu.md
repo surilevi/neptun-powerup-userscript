@@ -10,7 +10,7 @@ A script nem helyetted dönt, és nem kerül meg Neptun-szabályokat. A már kiv
 
 - `Course Store`: elmenti a kijelölt kurzusokat, később pedig visszatölti őket.
 - `Course Rush`: a mentett tárgyválasztást visszatölti, majd sorban megpróbálja felvenni a tárgyakat.
-- `Exam Quick Signup`: elment egy választott vizsgaidőpontot, majd később egy kattintással megpróbál jelentkezni rá.
+- `Exam Planner`: naptárban mutatja a látható felvett és mentett vizsgaidőpontokat, és továbbra is el tud menteni egy választott időpontot későbbi jelentkezéshez.
 - `Exam Rush`: az aktuálisan látható vizsgaoldalon végigpróbálja a mentett vizsgacélokat.
 - `Infinite Session`: normál használat közben megpróbálja frissen tartani a munkamenetet. Tárgyfelvételi vagy vizsgajelentkezési roham alatt a Neptun ettől függetlenül is kidobhat.
 - `Theme`: választható színkiemelés a Neptun felületén.

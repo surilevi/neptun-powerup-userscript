@@ -11,6 +11,7 @@ import {
   HIGHLIGHT_STYLE,
 } from './state'
 import type { ExamRowInfo } from './state'
+import { extractExamDateText } from './date'
 import { extractSubjectCodeFromText } from '../../utils/subject-code'
 
 function getSubjectCodeFromElements(elements: Array<Element | null | undefined>): string | null {
@@ -62,6 +63,42 @@ function getEnrollmentButton(row: HTMLTableRowElement): HTMLButtonElement | null
   })
 
   return submitButton ?? null
+}
+
+function normalizeStatusText(text: string): string {
+  return text
+    .toLocaleLowerCase('hu-HU')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+function getButtonTexts(root: Element | null | undefined): string[] {
+  if (!root) return []
+
+  return Array.from(root.querySelectorAll('button'))
+    .map((button) => normalizeStatusText(button.textContent ?? '').trim())
+    .filter(Boolean)
+}
+
+function getRegistrationState(
+  cells: Element[],
+  cellTexts: string[],
+  date: string,
+  felvetelBtn: HTMLButtonElement | null,
+): ExamRowInfo['registrationState'] {
+  const dateCellStatusText = normalizeStatusText((cellTexts[0] ?? '').replace(date, ' '))
+  const actionButtonTexts = getButtonTexts(cells[cells.length - 1])
+
+  if (
+    dateCellStatusText.includes('felveve') ||
+    actionButtonTexts.some((text) => text === 'leadas')
+  ) {
+    return 'registered'
+  }
+  if (dateCellStatusText.includes('betelt')) return 'full'
+  if (dateCellStatusText.includes('varolistas')) return 'waitlistOnly'
+  if (felvetelBtn) return 'available'
+  return 'unknown'
 }
 
 export type TableSubjectCodeMap = Map<Element, string>
@@ -200,19 +237,21 @@ export function parseExamRow(row: HTMLTableRowElement): ExamRowInfo {
   if (cells.length < 4) {
     api?.logger.warn(`[exam-dom-debug] parseExamRow: only ${cells.length} cells, expected 4+`)
   }
-  if (!felvetelBtn) {
-    api?.logger.warn('[exam-dom-debug] parseExamRow: action button not found on row')
-  }
   const cellTexts = cells.map((c) => getCellText(c))
 
   // Newer Neptun layouts collapse the table to 4 columns on narrower viewports:
   // date, type, capacity, action. Older layouts expose instructor and course code too.
   const isCompactLayout = cells.length === 4
-  const date = cellTexts[0] ?? ''
+  const date = extractExamDateText(cellTexts[0] ?? '') ?? cellTexts[0] ?? ''
   const type = cellTexts[1] ?? ''
   const capacity = cellTexts[2] ?? ''
   const instructor = isCompactLayout ? '' : (cellTexts[3] ?? '')
   const courseCode = isCompactLayout ? '' : (cellTexts[4] ?? '')
+  const registrationState = getRegistrationState(cells, cellTexts, date, felvetelBtn)
+
+  if (!felvetelBtn && registrationState === 'unknown') {
+    api?.logger.warn('[exam-dom-debug] parseExamRow: action button not found on row')
+  }
 
   return {
     row,
@@ -221,6 +260,7 @@ export function parseExamRow(row: HTMLTableRowElement): ExamRowInfo {
     capacity,
     instructor,
     courseCode,
+    registrationState,
     felvetelBtn,
   }
 }

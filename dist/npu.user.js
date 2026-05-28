@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Neptun PowerUp!
-// @namespace    npu
-// @version      3.1.5
+// @name         Neptun PowerUp! Userscript
+// @namespace    https://github.com/surilevi/neptun-powerup-userscript
+// @version      3.2.0
 // @author       surilevi
-// @description  Neptun helper userscript for course and exam workflows
+// @description  Neptun PowerUp! userscript for course and exam workflows
 // @license      MIT
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=neptun.net
 // @homepage     https://github.com/surilevi/neptun-powerup-userscript#readme
@@ -437,18 +437,18 @@ mat-expansion-panel {
 		yellow: "#ff9800",
 		red: "#f44336"
 	};
-	function pad2(n) {
+	function pad2$1(n) {
 		return n < 10 ? `0${n}` : `${n}`;
 	}
 	function formatTime(date) {
-		return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+		return `${pad2$1(date.getHours())}:${pad2$1(date.getMinutes())}:${pad2$1(date.getSeconds())}`;
 	}
 	function formatCountdown(ms) {
 		if (ms <= 0) return "0s";
 		const totalSec = Math.ceil(ms / 1e3);
 		const min = Math.floor(totalSec / 60);
 		const sec = totalSec % 60;
-		return min > 0 ? `${min}m ${pad2(sec)}s` : `${sec}s`;
+		return min > 0 ? `${min}m ${pad2$1(sec)}s` : `${sec}s`;
 	}
 	function levelIcon(level) {
 		switch (level) {
@@ -2867,6 +2867,57 @@ mat-expansion-panel {
 	function setCachedSubjectCode(value) {
 		cachedSubjectCode = value;
 	}
+	var HUNGARIAN_MONTHS = {
+		januar: 1,
+		februar: 2,
+		marcius: 3,
+		aprilis: 4,
+		majus: 5,
+		junius: 6,
+		julius: 7,
+		augusztus: 8,
+		szeptember: 9,
+		oktober: 10,
+		november: 11,
+		december: 12
+	};
+	var HUNGARIAN_DATE_RE = /(\d{4})\.\s*([A-Za-z\u00c0-\u017f]+)\s+(\d{1,2})\.\s*(\d{1,2}):(\d{2})/i;
+	var NUMERIC_DATE_RE = /(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})\.?\s+(\d{1,2}):(\d{2})/;
+	function pad2(value) {
+		return value < 10 ? `0${value}` : `${value}`;
+	}
+	function normalizeMonthName(value) {
+		return value.toLocaleLowerCase("hu-HU").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+	}
+	function buildParsedDate(raw, year, month, dayOfMonth, hour, minute) {
+		if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(dayOfMonth) || !Number.isInteger(hour) || !Number.isInteger(minute) || month < 1 || month > 12 || dayOfMonth < 1 || dayOfMonth > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+		return {
+			raw: raw.replace(/\s+/g, " ").trim(),
+			day: `${year}-${pad2(month)}-${pad2(dayOfMonth)}`,
+			time: `${pad2(hour)}:${pad2(minute)}`,
+			year,
+			month,
+			dayOfMonth
+		};
+	}
+	function extractExamDateText(text) {
+		const normalizedText = text.replace(/\s+/g, " ").trim();
+		return (normalizedText.match(HUNGARIAN_DATE_RE) ?? normalizedText.match(NUMERIC_DATE_RE))?.[0].replace(/\s+/g, " ").trim() ?? null;
+	}
+	function parseExamDateText(text) {
+		const normalizedText = text.replace(/\s+/g, " ").trim();
+		const hungarianMatch = normalizedText.match(HUNGARIAN_DATE_RE);
+		if (hungarianMatch) {
+			const [, rawYear, rawMonth, rawDay, rawHour, rawMinute] = hungarianMatch;
+			const month = HUNGARIAN_MONTHS[normalizeMonthName(rawMonth)];
+			if (!month) return null;
+			return buildParsedDate(hungarianMatch[0], Number(rawYear), month, Number(rawDay), Number(rawHour), Number(rawMinute));
+		}
+		const numericMatch = normalizedText.match(NUMERIC_DATE_RE);
+		if (!numericMatch) return null;
+		const [, rawYear, rawMonth, rawDay, rawHour, rawMinute] = numericMatch;
+		return buildParsedDate(numericMatch[0], Number(rawYear), Number(rawMonth), Number(rawDay), Number(rawHour), Number(rawMinute));
+	}
 	function getSubjectCodeFromElements(elements) {
 		for (const element of elements) {
 			const code = extractSubjectCodeFromText(element?.textContent ?? "");
@@ -2904,6 +2955,22 @@ mat-expansion-panel {
 		return Array.from(row.querySelectorAll("button")).find((button) => {
 			return (button.textContent ?? "").replace(/\s+/g, " ").trim().toLowerCase().includes("felv");
 		}) ?? null;
+	}
+	function normalizeStatusText(text) {
+		return text.toLocaleLowerCase("hu-HU").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+	}
+	function getButtonTexts(root) {
+		if (!root) return [];
+		return Array.from(root.querySelectorAll("button")).map((button) => normalizeStatusText(button.textContent ?? "").trim()).filter(Boolean);
+	}
+	function getRegistrationState(cells, cellTexts, date, felvetelBtn) {
+		const dateCellStatusText = normalizeStatusText((cellTexts[0] ?? "").replace(date, " "));
+		const actionButtonTexts = getButtonTexts(cells[cells.length - 1]);
+		if (dateCellStatusText.includes("felveve") || actionButtonTexts.some((text) => text === "leadas")) return "registered";
+		if (dateCellStatusText.includes("betelt")) return "full";
+		if (dateCellStatusText.includes("varolistas")) return "waitlistOnly";
+		if (felvetelBtn) return "available";
+		return "unknown";
 	}
 	function buildTableSubjectCodeMap() {
 		const map = new Map();
@@ -2989,16 +3056,23 @@ mat-expansion-panel {
 		const cells = Array.from(row.querySelectorAll("td"));
 		const felvetelBtn = getEnrollmentButton(row);
 		if (cells.length < 4) api?.logger.warn(`[exam-dom-debug] parseExamRow: only ${cells.length} cells, expected 4+`);
-		if (!felvetelBtn) api?.logger.warn("[exam-dom-debug] parseExamRow: action button not found on row");
 		const cellTexts = cells.map((c) => getCellText(c));
 		const isCompactLayout = cells.length === 4;
+		const date = extractExamDateText(cellTexts[0] ?? "") ?? cellTexts[0] ?? "";
+		const type = cellTexts[1] ?? "";
+		const capacity = cellTexts[2] ?? "";
+		const instructor = isCompactLayout ? "" : cellTexts[3] ?? "";
+		const courseCode = isCompactLayout ? "" : cellTexts[4] ?? "";
+		const registrationState = getRegistrationState(cells, cellTexts, date, felvetelBtn);
+		if (!felvetelBtn && registrationState === "unknown") api?.logger.warn("[exam-dom-debug] parseExamRow: action button not found on row");
 		return {
 			row,
-			date: cellTexts[0] ?? "",
-			type: cellTexts[1] ?? "",
-			capacity: cellTexts[2] ?? "",
-			instructor: isCompactLayout ? "" : cellTexts[3] ?? "",
-			courseCode: isCompactLayout ? "" : cellTexts[4] ?? "",
+			date,
+			type,
+			capacity,
+			instructor,
+			courseCode,
+			registrationState,
 			felvetelBtn
 		};
 	}
@@ -3120,7 +3194,10 @@ mat-expansion-panel {
 		if (!api) return {};
 		const raw = await api.storage.getForDomain("examPreferences") ?? {};
 		const valid = {};
-		for (const [code, pref] of Object.entries(raw)) if (pref && typeof pref.date === "string" && pref.date.length > 0) valid[code] = pref;
+		for (const [code, pref] of Object.entries(raw)) if (pref && typeof pref.date === "string" && pref.date.length > 0) valid[code] = {
+			...pref,
+			date: extractExamDateText(pref.date) ?? pref.date
+		};
 		return valid;
 	}
 	async function savePreferences(prefs) {
@@ -3489,7 +3566,209 @@ mat-expansion-panel {
 		api?.logger.warn(`[exam-enroll-debug] waitForExamTable: timed out after ${pollCount} polls (${timeoutMs}ms, mutations=${mutationCount})`);
 		return false;
 	}
-	var EXAM_UI_BUILD = "3.1.5 tooling-v8-a";
+	var MONTH_LABELS = [
+		"January",
+		"February",
+		"March",
+		"April",
+		"May",
+		"June",
+		"July",
+		"August",
+		"September",
+		"October",
+		"November",
+		"December"
+	];
+	var WEEKDAY_LABELS = [
+		"Mon",
+		"Tue",
+		"Wed",
+		"Thu",
+		"Fri",
+		"Sat",
+		"Sun"
+	];
+	function todayKey(now) {
+		const year = now.getFullYear();
+		const month = now.getMonth() + 1;
+		const day = now.getDate();
+		return `${year}-${month < 10 ? `0${month}` : month}-${day < 10 ? `0${day}` : day}`;
+	}
+	function compareEntries(a, b) {
+		return a.parsed.day.localeCompare(b.parsed.day) || a.parsed.time.localeCompare(b.parsed.time) || a.subjectCode.localeCompare(b.subjectCode);
+	}
+	function getInitialMonth(entries, now) {
+		const today = todayKey(now);
+		const sorted = [...entries].sort(compareEntries);
+		const upcoming = sorted.find((entry) => entry.parsed.day >= today) ?? sorted[sorted.length - 1];
+		return {
+			year: upcoming.parsed.year,
+			month: upcoming.parsed.month
+		};
+	}
+	function getDaysInMonth(year, month) {
+		return new Date(year, month, 0).getDate();
+	}
+	function getMonthStartOffset(year, month) {
+		return (new Date(year, month - 1, 1).getDay() + 6) % 7;
+	}
+	function groupByDay(entries) {
+		const map = new Map();
+		for (const entry of entries) {
+			const dayEntries = map.get(entry.parsed.day) ?? [];
+			dayEntries.push(entry);
+			map.set(entry.parsed.day, dayEntries);
+		}
+		for (const dayEntries of map.values()) dayEntries.sort(compareEntries);
+		return map;
+	}
+	function buildRegisteredExamCalendarEntries(rows) {
+		const entries = [];
+		for (const { info, subjectCode } of rows) {
+			if (info.registrationState !== "registered") continue;
+			const parsed = parseExamDateText(info.date);
+			if (!parsed) continue;
+			const resolvedSubjectCode = subjectCode ?? "Unknown subject";
+			entries.push({
+				id: `registered:${resolvedSubjectCode}:${parsed.day}:${parsed.time}`,
+				subjectCode: resolvedSubjectCode,
+				rawDate: info.date,
+				parsed,
+				type: info.type,
+				courseCode: info.courseCode,
+				source: "registered",
+				registrationState: info.registrationState
+			});
+		}
+		return entries.sort(compareEntries);
+	}
+	function renderExamCalendar(entries, now = new Date()) {
+		if (entries.length === 0) return null;
+		const today = todayKey(now);
+		const entriesByDay = groupByDay(entries);
+		let { year, month } = getInitialMonth(entries, now);
+		let selectedDay = entries.find((entry) => entry.parsed.day >= today)?.parsed.day ?? entries[0]?.parsed.day;
+		const root = document.createElement("div");
+		root.style.cssText = "margin-top: 8px; padding: 7px; background: #0f2040; border-radius: 4px; color: #d9e7ff;";
+		const label = document.createElement("div");
+		label.style.cssText = "font-size: 10px; color: #8baae0; margin-bottom: 5px; display: flex; justify-content: space-between; gap: 6px;";
+		label.textContent = "Registered exams";
+		root.appendChild(label);
+		const header = document.createElement("div");
+		header.style.cssText = "display: flex; align-items: center; gap: 6px; margin-bottom: 6px;";
+		const title = document.createElement("div");
+		title.style.cssText = "font-weight: 700; color: #5c9eff; font-size: 11px; flex: 1;";
+		const prevBtn = document.createElement("button");
+		const nextBtn = document.createElement("button");
+		for (const btn of [prevBtn, nextBtn]) {
+			btn.type = "button";
+			btn.style.cssText = "width: 24px; height: 22px; border: 1px solid #2c4875; background: #162d55; color: #d9e7ff; border-radius: 3px; cursor: pointer; font-size: 12px; line-height: 1;";
+		}
+		prevBtn.textContent = "<";
+		prevBtn.title = "Previous month";
+		nextBtn.textContent = ">";
+		nextBtn.title = "Next month";
+		header.appendChild(prevBtn);
+		header.appendChild(title);
+		header.appendChild(nextBtn);
+		root.appendChild(header);
+		const grid = document.createElement("div");
+		grid.style.cssText = "display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px;";
+		root.appendChild(grid);
+		const details = document.createElement("div");
+		details.style.cssText = "margin-top: 7px; border-top: 1px solid #1a3560; padding-top: 6px; max-height: 88px; overflow-y: auto;";
+		root.appendChild(details);
+		function renderDetails() {
+			while (details.firstChild) details.removeChild(details.firstChild);
+			const dayEntries = selectedDay ? entriesByDay.get(selectedDay) ?? [] : [];
+			if (dayEntries.length === 0) {
+				const empty = document.createElement("div");
+				empty.style.cssText = "font-size: 10px; color: #8baae0;";
+				empty.textContent = "No exam selected.";
+				details.appendChild(empty);
+				return;
+			}
+			for (const entry of dayEntries) {
+				const row = document.createElement("div");
+				row.style.cssText = "display: grid; grid-template-columns: auto 1fr auto; gap: 5px; align-items: baseline; padding: 2px 0; font-size: 10px;";
+				const time = document.createElement("span");
+				time.style.cssText = "color: #ffffff; font-weight: 700;";
+				time.textContent = entry.parsed.time;
+				row.appendChild(time);
+				const label = document.createElement("span");
+				label.style.cssText = "color: #b7cdf8; overflow-wrap: anywhere;";
+				label.textContent = `${entry.subjectCode}${entry.courseCode ? ` (${entry.courseCode})` : ""}`;
+				row.appendChild(label);
+				const badge = document.createElement("span");
+				badge.style.cssText = `color: ${entry.source === "registered" ? "#7de38b" : "#80b8ff"}; font-weight: 700;`;
+				badge.textContent = entry.source === "registered" ? "Registered" : "Saved";
+				row.appendChild(badge);
+				details.appendChild(row);
+			}
+		}
+		function renderMonth() {
+			title.textContent = `${MONTH_LABELS[month - 1]} ${year}`;
+			while (grid.firstChild) grid.removeChild(grid.firstChild);
+			for (const label of WEEKDAY_LABELS) {
+				const cell = document.createElement("div");
+				cell.style.cssText = "font-size: 9px; color: #8baae0; text-align: center; font-weight: 700;";
+				cell.textContent = label;
+				grid.appendChild(cell);
+			}
+			for (let i = 0; i < getMonthStartOffset(year, month); i++) grid.appendChild(document.createElement("div"));
+			for (let day = 1; day <= getDaysInMonth(year, month); day++) {
+				const key = `${year}-${month < 10 ? `0${month}` : month}-${day < 10 ? `0${day}` : day}`;
+				const dayEntries = entriesByDay.get(key) ?? [];
+				const hasRegistered = dayEntries.some((entry) => entry.source === "registered");
+				const hasSaved = dayEntries.some((entry) => entry.source === "saved");
+				const isSelected = selectedDay === key;
+				const isToday = today === key;
+				const btn = document.createElement("button");
+				btn.type = "button";
+				btn.style.cssText = [
+					"height: 25px",
+					"border-radius: 3px",
+					"border: 1px solid transparent",
+					"font-size: 10px",
+					"font-weight: 700",
+					"cursor: pointer",
+					"letter-spacing: 0",
+					dayEntries.length > 0 ? "color: #ffffff" : "color: #9db3d6",
+					hasRegistered ? "background: #1f5f45" : hasSaved ? "background: #173f72" : "background: #172846",
+					isSelected ? "border-color: #ffffff" : isToday ? "border-color: #ffcf66" : ""
+				].filter(Boolean).join(";");
+				btn.textContent = `${day}`;
+				btn.title = dayEntries.map((entry) => `${entry.parsed.time} ${entry.subjectCode} (${entry.source})`).join("\n");
+				btn.addEventListener("click", () => {
+					selectedDay = key;
+					renderMonth();
+					renderDetails();
+				});
+				grid.appendChild(btn);
+			}
+		}
+		prevBtn.addEventListener("click", () => {
+			month--;
+			if (month < 1) {
+				month = 12;
+				year--;
+			}
+			renderMonth();
+		});
+		nextBtn.addEventListener("click", () => {
+			month++;
+			if (month > 12) {
+				month = 1;
+				year++;
+			}
+			renderMonth();
+		});
+		renderMonth();
+		renderDetails();
+		return root;
+	}
+	var EXAM_UI_BUILD = "3.2.0 exam-calendar";
 	async function savePreferredExam(subjectCode, date, type, courseCode) {
 		const api = getApi();
 		const prefs = await loadPreferences();
@@ -3521,7 +3800,7 @@ mat-expansion-panel {
 		const debugEnabled = isDebugEnabled();
 		const heading = document.createElement("div");
 		heading.style.cssText = "font-weight: bold; color: #5c9eff; margin-bottom: 6px;";
-		heading.textContent = "Exam Quick Signup";
+		heading.textContent = "Exam Planner";
 		container.appendChild(heading);
 		if (debugEnabled) {
 			const buildDiv = document.createElement("div");
@@ -3562,6 +3841,11 @@ mat-expansion-panel {
 			container.appendChild(infoDiv);
 		}
 		const allPrefsEntries = Object.entries(prefs);
+		const calendar = renderExamCalendar(buildRegisteredExamCalendarEntries(getExamRows().map((row) => ({
+			info: parseExamRow(row),
+			subjectCode: getRowSubjectCode(row) ?? subjectCode
+		}))));
+		if (calendar) container.appendChild(calendar);
 		if (allPrefsEntries.length > 0) {
 			const toggleBtn = document.createElement("button");
 			toggleBtn.style.cssText = `${btnStyle} background: #37474f; color: white; margin-top: 6px; display: block;`;
@@ -3623,8 +3907,8 @@ mat-expansion-panel {
 	var EXAM_RUSH_SETTLE_MS = 2e3;
 	var examSignupModule = {
 		id: "exam-signup",
-		name: "Exam Quick Signup",
-		description: "Save exam dates and try enrolling them from the current page",
+		name: "Exam Planner",
+		description: "Visualize registered exams, save preferred dates, and enroll them from the page",
 		shouldActivate(context) {
 			return /\/exams\/overview\/registration\/?$/.test(context.path);
 		},

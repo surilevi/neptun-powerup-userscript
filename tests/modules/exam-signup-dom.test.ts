@@ -178,7 +178,136 @@ describe('exam-signup table parsing', () => {
     expect(info.capacity).toBe('0 / 23')
     expect(info.instructor).toBe('')
     expect(info.courseCode).toBe('')
+    expect(info.registrationState).toBe('available')
     expect(info.felvetelBtn?.textContent).toContain('Felvetel')
+  })
+
+  it('separates registered row status from the exam date', () => {
+    document.body.innerHTML = `
+      <table>
+        <tr>
+          <td>
+            <button>2026. június 4. 13:00</button>
+            <div>Felvéve</div>
+          </td>
+          <td>Írásbeli</td>
+          <td>33 / 100</td>
+          <td>Dr. Szieberth Dénes</td>
+          <td>10</td>
+          <td><button>Leadás</button><button>Részletek</button></td>
+        </tr>
+      </table>
+    `
+
+    const rows = getExamRows()
+    const info = parseExamRow(rows[0])
+
+    expect(info.date).toBe('2026. június 4. 13:00')
+    expect(info.registrationState).toBe('registered')
+    expect(info.felvetelBtn).toBeNull()
+  })
+
+  it('detects full and waitlist-only exam row states from visible labels', () => {
+    document.body.innerHTML = `
+      <table>
+        <tr>
+          <td>2026. június 8. 8:00<div>Csak várólistás jelentkezés.</div></td>
+          <td>Írásbeli</td>
+          <td>23 / 23</td>
+          <td><button>Felvétel</button></td>
+        </tr>
+        <tr>
+          <td>2026. június 8. 9:00<div>Betelt</div></td>
+          <td>Szóbeli</td>
+          <td>0 / 0</td>
+          <td><button>Felvétel</button></td>
+        </tr>
+      </table>
+    `
+
+    const rows = getExamRows()
+
+    expect(parseExamRow(rows[0]).registrationState).toBe('waitlistOnly')
+    expect(parseExamRow(rows[1]).registrationState).toBe('full')
+  })
+
+  it('treats a full exam as registered when the row also says the student is enrolled', () => {
+    document.body.innerHTML = `
+      <table>
+        <tr>
+          <td>2026. június 11. 8:00<div>Betelt • Felvéve</div></td>
+          <td>Írásbeli</td>
+          <td>100 / 100</td>
+          <td>Dr. Buttyán Levente</td>
+          <td>E</td>
+          <td><button>Leadás</button><button>Részletek</button></td>
+        </tr>
+      </table>
+    `
+
+    const rows = getExamRows()
+
+    expect(parseExamRow(rows[0]).registrationState).toBe('registered')
+  })
+
+  it('does not treat available, full, or waitlist-only rows as registered beside another registered table', () => {
+    document.body.innerHTML = `
+      <main>
+        <h3>A könnyűbúvárkodás - mérnöki szemmel</h3>
+        <p>BMEVESAA010</p>
+        <table>
+          <tr>
+            <td>2026. június 4. 13:00<div>Felvéve</div></td>
+            <td>Írásbeli</td>
+            <td>34 / 100</td>
+            <td>Dr. Szieberth Dénes</td>
+            <td>10</td>
+            <td><button>Leadás</button><button>Részletek</button></td>
+          </tr>
+          <tr>
+            <td>2026. június 11. 13:00</td>
+            <td>Írásbeli</td>
+            <td>7 / 100</td>
+            <td>Dr. Szieberth Dénes</td>
+            <td>10</td>
+            <td><button>Felvétel</button><button>Részletek</button></td>
+          </tr>
+        </table>
+
+        <h3>Adatbázisok</h3>
+        <p>BMEVITMAB04</p>
+        <table>
+          <tr>
+            <td>2026. június 8. 8:00<div>Csak várólistás jelentkezés.</div></td>
+            <td>Írásbeli</td>
+            <td>23 / 23</td>
+            <td>Dr. Gajdos Sándor</td>
+            <td>V1</td>
+            <td><button>Felvétel</button><button>Részletek</button></td>
+          </tr>
+          <tr>
+            <td>2026. június 8. 9:00<div>Betelt</div></td>
+            <td>Szóbeli</td>
+            <td>0 / 0</td>
+            <td>Dr. Gajdos Sándor</td>
+            <td>V1</td>
+            <td><button>Felvétel</button><button>Részletek</button></td>
+          </tr>
+          <tr>
+            <td>2026. június 9. 8:00</td>
+            <td>Írásbeli</td>
+            <td>7 / 23</td>
+            <td>Dr. Gajdos Sándor</td>
+            <td>V1</td>
+            <td><button>Felvétel</button><button>Részletek</button></td>
+          </tr>
+        </table>
+      </main>
+    `
+
+    const states = getExamRows().map((row) => parseExamRow(row).registrationState)
+
+    expect(states).toEqual(['registered', 'available', 'waitlistOnly', 'full', 'available'])
   })
 
   it('prefers the Felvetel action button over date and details buttons', () => {

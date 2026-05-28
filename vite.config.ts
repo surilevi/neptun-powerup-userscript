@@ -7,10 +7,10 @@ export default defineConfig({
     monkey({
       entry: 'src/index.ts',
       userscript: {
-        name: 'Neptun PowerUp!',
-        namespace: 'npu',
+        name: 'Neptun PowerUp! Userscript',
+        namespace: 'https://github.com/surilevi/neptun-powerup-userscript',
         version: pkg.version,
-        description: 'Neptun helper userscript for course and exam workflows',
+        description: 'Neptun PowerUp! userscript for course and exam workflows',
         author: 'surilevi',
         license: 'MIT',
         icon: 'https://www.google.com/s2/favicons?sz=64&domain=neptun.net',

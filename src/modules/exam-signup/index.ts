@@ -20,8 +20,8 @@ const EXAM_RUSH_SETTLE_MS = 2_000
 
 export const examSignupModule: NpuModule = {
   id: 'exam-signup',
-  name: 'Exam Quick Signup',
-  description: 'Save exam dates and try enrolling them from the current page',
+  name: 'Exam Planner',
+  description: 'Visualize registered exams, save preferred dates, and enroll them from the page',
 
   shouldActivate(context: PageContext): boolean {
     return /\/exams\/overview\/registration\/?$/.test(context.path)
