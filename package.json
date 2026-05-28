@@ -1,7 +1,7 @@
 {
   "name": "neptun-powerup-userscript",
-  "version": "3.1.5",
-  "description": "Neptun helper userscript for course and exam workflows",
+  "version": "3.2.0",
+  "description": "Neptun PowerUp! userscript for course and exam workflows",
   "type": "module",
   "packageManager": "pnpm@10.32.1",
   "homepage": "https://github.com/surilevi/neptun-powerup-userscript#readme",
@@ -52,9 +52,9 @@
     "jsdom": "^29.1.1",
     "prettier": "^3.8.3",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.59.3",
-    "vite": "^8.0.13",
+    "typescript-eslint": "^8.60.0",
+    "vite": "^8.0.14",
     "vite-plugin-monkey": "^8.0.5",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.7"
   }
 }

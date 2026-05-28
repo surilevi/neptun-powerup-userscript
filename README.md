@@ -1,46 +1,56 @@
 # Neptun PowerUp!
 
-[![CI](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/ci.yml/badge.svg)](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/codeql.yml/badge.svg)](https://github.com/surilevi/neptun-powerup-userscript/actions/workflows/codeql.yml)
+Magyar nyelvű Tampermonkey userscript Neptunhoz. A célja egyszerű: kevesebb ismétlődő kattintás, kevesebb kapkodás tárgyfelvételkor és vizsgajelentkezéskor.
 
-A Tampermonkey userscript for Neptun student portals.
+A script nem helyetted dönt, és nem kerül meg Neptun-szabályokat. A már kiválasztott kurzusokat és vizsgaidőpontokat tudja elmenteni, visszatölteni, majd kérésre végigkattintani. Emellett normál használat közben próbálja életben tartani az aktív munkamenetet, de nagy terhelésű tárgyfelvételi vagy vizsgajelentkezési időszakban ezt nem lehet garantálni.
 
-Hungarian documentation: [README.hu.md](README.hu.md)
+> Fontos: ez a projekt böngészőben futó automatizálást végez a Neptun felületén. Csak saját felelősségre használd, és vedd figyelembe a saját intézményed szabályait.
 
-Neptun PowerUp! helps with the parts of Neptun that usually mean repeating the same clicks: saving course selections, restoring them during registration, nudging the current session to stay alive during normal use, and rejoining saved exam dates.
+## Mire jó?
 
-> Important: this tool automates parts of the Neptun UI. Use it at your own risk and check your university's rules before relying on it.
+- `Course Store`: elmenti a kijelölt kurzusokat, később pedig visszatölti őket.
+- `Course Rush`: a mentett tárgyválasztást visszatölti, majd sorban megpróbálja felvenni a tárgyakat.
+- `Exam Planner`: naptárban mutatja a látható felvett és mentett vizsgaidőpontokat, és továbbra is el tud menteni egy választott időpontot későbbi jelentkezéshez.
+- `Exam Rush`: az aktuálisan látható vizsgaoldalon végigpróbálja a mentett vizsgacélokat.
+- `Infinite Session`: normál használat közben megpróbálja frissen tartani a munkamenetet. Tárgyfelvételi vagy vizsgajelentkezési roham alatt a Neptun ettől függetlenül is kidobhat.
+- `Theme`: választható színkiemelés a Neptun felületén.
 
-## Installation
+## Telepítés
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser.
-2. If you use Chrome or Edge, open the browser extensions page and enable Developer Mode so Tampermonkey can run userscripts.
-3. Open the public userscript build:
+1. Telepítsd a [Tampermonkey](https://www.tampermonkey.net/) böngészőbővítményt.
+2. Chrome vagy Edge alatt nyisd meg a böngésző bővítménykezelőjét, és kapcsold be a Fejlesztői módot, hogy a Tampermonkey futtatni tudja a userscripteket.
+3. Nyisd meg a publikus userscript buildet:
    [dist/npu.user.js](https://github.com/surilevi/neptun-powerup-userscript/raw/main/dist/npu.user.js)
-4. Install the script in Tampermonkey.
-5. Open your university's Neptun portal. The NPU panel appears in the bottom-right corner.
+4. Telepítsd a scriptet Tampermonkey-ben.
+5. Nyisd meg a saját Neptun felületedet. Az NPU panel a jobb alsó sarokban jelenik meg.
 
-## Features
+## Támogatott portálútvonalak
 
-- Course Store: saves selected courses and restores them later.
-- Course Rush: loads saved courses and tries to enroll them one by one.
-- Exam Quick Signup: saves a preferred exam date and tries to enroll it with one click.
-- Exam Rush: scans the visible exam page for saved exam targets.
-- Infinite Session: best-effort session nudges during normal use. Neptun can still force logout during course or exam registration rushes.
-- Theme: optional accent colors for the Neptun UI.
-
-## Portal Paths
-
-The userscript watches common Neptun student portal paths instead of a fixed university host list:
+A userscript nem konkrét egyetemi hostnevekre van bekötve. A gyakori Neptun hallgatói útvonalakat figyeli:
 
 - `/hallgatoi/*`
 - `/hallgato_ng/*`
 - `/hallgatoing/*`
 - `/ujhallgato/*`
 
-Course and exam features do not depend on `BME...` subject codes. Detection is based on the visible Neptun UI, so it can work across different university installs, but local Neptun changes may still need fixes.
+Emiatt több intézményi Neptun-telepítésen is működhet külön build nélkül. A helyi Neptun-testreszabások ettől még okozhatnak eltéréseket.
 
-## Development
+## Korlátok
+
+- A script a jelenlegi Neptun Angular/Material DOM-szerkezetére támaszkodik. Egy Neptun UI-frissítés eltörhet szelektorokat.
+- A tárgy- és vizsgafelismerés heurisztikus. Szokatlan helyi jelöléseknél szükség lehet finomhangolásra.
+- A felvételi műveletek szándékosan egymás után futnak. A Neptun gyakran rosszul kezeli a párhuzamos kéréseket.
+- A vizsgafunkciók az éppen megnyitott vizsgaoldalon dolgoznak. Nem járják be önállóan az összes tárgyat és vizsgaoldalt.
+- Az `Infinite Session` nem jelent biztos védelmet regisztrációs időszakban. Ha a Neptun szerveroldalon érvényteleníti a munkamenetet, azt egy userscript nem tudja megakadályozni.
+
+## Adatkezelés
+
+- A script a saját beállításait és mentett választásait Tampermonkey-tárhelyen tárolja.
+- Ha a Tampermonkey tárhely-API nem érhető el, az NPU nem aktiválódik.
+- Felhasználónevet és jelszót nem ment tartósan.
+- A részletes debug naplózás csak akkor aktív, ha külön bekapcsolod.
+
+## Fejlesztés
 
 ```bash
 pnpm install
@@ -49,26 +59,24 @@ pnpm test
 pnpm typecheck
 ```
 
-For verbose debug logs, run `localStorage.npu_debug = 'true'` in the browser console and reload. Set it back to `'false'` to keep the console quiet.
+Részletes debug naplózáshoz állítsd be ezt a böngésző konzoljában:
 
-## Limitations
+```js
+localStorage.npu_debug = 'true'
+```
 
-- The script relies on Neptun's current Angular Material DOM. A Neptun UI update can break selectors.
-- Subject and exam detection is heuristic. Unusual local labels may need tuning.
-- Enrollment runs sequentially on purpose. Neptun often handles parallel requests badly.
-- Exam features work on the currently open exam page. They do not browse every subject page on their own.
-- Infinite Session cannot guarantee registration-day persistence. During heavy course or exam signup windows, Neptun may invalidate the session server-side no matter what the browser does.
+Kikapcsoláshoz:
 
-## Privacy
+```js
+localStorage.npu_debug = 'false'
+```
 
-The script stores its own settings and saved selections in Tampermonkey storage. It does not save usernames or passwords. If Tampermonkey's storage API is unavailable, NPU does not activate.
+## Jogi megjegyzés
 
-## Legal
+A projekt automatizált böngésző-interakciókat végez a Neptunban, ezért ütközhet intézményi szabályokkal. A használat következményeiért mindenki maga felel.
 
-Neptun PowerUp! automates browser interactions with Neptun and may violate university rules or acceptable-use policies. You are responsible for how you use it.
+Részletesebb jogi szöveg: [LEGAL_NOTICE.md](LEGAL_NOTICE.md)
 
-For more detail, see [LEGAL_NOTICE.md](LEGAL_NOTICE.md).
-
-## License
+## Licenc
 
 MIT

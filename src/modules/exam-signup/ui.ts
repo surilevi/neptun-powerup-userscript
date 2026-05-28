@@ -2,16 +2,20 @@ import { getApi } from './state'
 import {
   getSubjectCode,
   getSubjectName,
+  getExamRows,
+  getRowSubjectCode,
+  parseExamRow,
   highlightSavedRow,
   clearHighlights,
   addSaveButtonsToRows,
   watchTableForReRenders,
 } from './dom'
+import { buildRegisteredExamCalendarEntries, renderExamCalendar } from './calendar'
 import { loadPreferences, savePreferences } from './storage'
 import { autoEnrollSaved } from './enroll'
 import { isDebugEnabled } from '../../utils/debug'
 
-const EXAM_UI_BUILD = '3.1.5 tooling-v8-a'
+const EXAM_UI_BUILD = '3.2.0 exam-calendar'
 
 async function savePreferredExam(
   subjectCode: string,
@@ -49,7 +53,7 @@ export async function renderModuleUI(): Promise<void> {
 
   const heading = document.createElement('div')
   heading.style.cssText = 'font-weight: bold; color: #5c9eff; margin-bottom: 6px;'
-  heading.textContent = 'Exam Quick Signup'
+  heading.textContent = 'Exam Planner'
   container.appendChild(heading)
 
   if (debugEnabled) {
@@ -104,6 +108,18 @@ export async function renderModuleUI(): Promise<void> {
   }
 
   const allPrefsEntries = Object.entries(prefs)
+  const examRows = getExamRows()
+  const registeredCalendarEntries = buildRegisteredExamCalendarEntries(
+    examRows.map((row) => ({
+      info: parseExamRow(row),
+      subjectCode: getRowSubjectCode(row) ?? subjectCode,
+    })),
+  )
+  const calendar = renderExamCalendar(registeredCalendarEntries)
+  if (calendar) {
+    container.appendChild(calendar)
+  }
+
   if (allPrefsEntries.length > 0) {
     const toggleBtn = document.createElement('button')
     toggleBtn.style.cssText = `${btnStyle} background: #37474f; color: white; margin-top: 6px; display: block;`
