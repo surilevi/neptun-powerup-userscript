@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neptun PowerUp! Userscript
 // @namespace    https://github.com/surilevi/neptun-powerup-userscript
-// @version      3.2.0
+// @version      3.2.1
 // @author       surilevi
 // @description  Neptun PowerUp! userscript for course and exam workflows
 // @license      MIT
@@ -162,6 +162,7 @@
 		const panel = statusPanel ?? {
 			setSessionStatus: () => {},
 			addMessage: () => {},
+			setVersionWarning: () => {},
 			setModuleContent: () => {},
 			setModuleContentElement: () => {},
 			expand: () => {},
@@ -352,7 +353,7 @@ mat-expansion-panel {
   background-color: var(--npu-accent) !important;
 }
 `;
-	var api$3 = null;
+	var api$4 = null;
 	var styleElement = null;
 	var unsubTheme = null;
 	function getPreset(key) {
@@ -400,21 +401,21 @@ mat-expansion-panel {
 			return true;
 		},
 		initialize(moduleApi) {
-			api$3 = moduleApi;
-			const settings = api$3.statusPanel.getThemeSettings();
+			api$4 = moduleApi;
+			const settings = api$4.statusPanel.getThemeSettings();
 			if (settings.enabled) {
 				const preset = getPreset(settings.color);
 				inject(preset);
-				api$3.logger.info(`theme activated: ${preset.name}`);
+				api$4.logger.info(`theme activated: ${preset.name}`);
 			}
-			unsubTheme = api$3.statusPanel.onThemeSettingsChange((newSettings) => {
+			unsubTheme = api$4.statusPanel.onThemeSettingsChange((newSettings) => {
 				if (newSettings.enabled) {
 					const preset = getPreset(newSettings.color);
 					inject(preset);
-					api$3?.logger.info(`theme changed to ${preset.name}`);
+					api$4?.logger.info(`theme changed to ${preset.name}`);
 				} else {
 					remove();
-					api$3?.logger.info("theme deactivated");
+					api$4?.logger.info("theme deactivated");
 				}
 			});
 		},
@@ -422,7 +423,7 @@ mat-expansion-panel {
 			unsubTheme?.();
 			unsubTheme = null;
 			remove();
-			api$3 = null;
+			api$4 = null;
 		}
 	};
 	var MAX_MESSAGES = 5;
@@ -489,6 +490,7 @@ mat-expansion-panel {
 		let headerDot = null;
 		let sessionLine = null;
 		let messageList = null;
+		let versionWarningSection = null;
 		let moduleSection = null;
 		let minimizeBtn = null;
 		let courseRushToggle = null;
@@ -730,6 +732,14 @@ mat-expansion-panel {
 			examLabel.appendChild(examTrack);
 			examLabel.appendChild(examLabelText);
 			rushSection.appendChild(examLabel);
+			versionWarningSection = document.createElement("div");
+			versionWarningSection.id = "npu-version-warning";
+			versionWarningSection.style.cssText = `
+      display: none;
+      padding: 8px 14px;
+      border-bottom: 1px solid ${COLORS.border};
+      flex-shrink: 0;
+    `;
 			const messageFeedSection = document.createElement("div");
 			messageFeedSection.style.cssText = `
       padding: 6px 14px;
@@ -750,6 +760,7 @@ mat-expansion-panel {
 			normalContent.id = "npu-normal-content";
 			normalContent.appendChild(sessionSection);
 			normalContent.appendChild(rushSection);
+			normalContent.appendChild(versionWarningSection);
 			normalContent.appendChild(messageFeedSection);
 			normalContent.appendChild(moduleSection);
 			panel.appendChild(normalContent);
@@ -931,6 +942,37 @@ mat-expansion-panel {
 				messageList.appendChild(row);
 			}
 		}
+		function setVersionWarning(warning) {
+			if (!versionWarningSection) return;
+			while (versionWarningSection.firstChild) versionWarningSection.removeChild(versionWarningSection.firstChild);
+			if (!warning) {
+				versionWarningSection.style.display = "none";
+				return;
+			}
+			versionWarningSection.style.display = "block";
+			const title = document.createElement("div");
+			title.style.cssText = `font-size: 12px; font-weight: 700; color: ${COLORS.yellow}; margin-bottom: 4px;`;
+			title.textContent = warning.title;
+			versionWarningSection.appendChild(title);
+			const detail = document.createElement("div");
+			detail.style.cssText = `font-size: 11px; color: ${COLORS.text}; margin-bottom: 6px;`;
+			detail.textContent = warning.detail;
+			versionWarningSection.appendChild(detail);
+			const versions = document.createElement("div");
+			versions.style.cssText = `font-size: 10px; color: ${COLORS.textMuted}; line-height: 1.4; margin-bottom: 8px; word-break: break-word;`;
+			versions.textContent = warning.previous ? `Previous: ${warning.previous} | Current: ${warning.current}` : `Current: ${warning.current}`;
+			versionWarningSection.appendChild(versions);
+			const action = document.createElement("button");
+			action.type = "button";
+			action.style.cssText = `padding: 5px 10px; background: ${COLORS.yellow}; color: #1a1a2e; border: 0; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 600;`;
+			action.textContent = warning.actionLabel;
+			action.addEventListener("click", async () => {
+				action.setAttribute("disabled", "true");
+				action.style.opacity = "0.7";
+				await warning.onAction();
+			});
+			versionWarningSection.appendChild(action);
+		}
 		function startCountdown() {
 			stopCountdown();
 			countdownTimer = setInterval(() => {
@@ -1056,6 +1098,7 @@ mat-expansion-panel {
 			headerDot = null;
 			sessionLine = null;
 			messageList = null;
+			versionWarningSection = null;
 			moduleSection = null;
 			minimizeBtn = null;
 			courseRushToggle = null;
@@ -1096,6 +1139,7 @@ mat-expansion-panel {
 		return {
 			setSessionStatus,
 			addMessage,
+			setVersionWarning,
 			setModuleContent,
 			setModuleContentElement,
 			expand,
@@ -1351,7 +1395,7 @@ mat-expansion-panel {
 	var currentExpiresAt = 0;
 	var currentRefreshExpiresAt = 0;
 	var sessionExpiredEmitted = false;
-	var api$2 = null;
+	var api$3 = null;
 	var unsubscribe = null;
 	var visibilityHandler = null;
 	var sessionModalObserver = null;
@@ -1423,15 +1467,15 @@ mat-expansion-panel {
 		};
 	}
 	function restoreSessionStatusAfterRefreshFailure() {
-		if (!api$2) return;
+		if (!api$3) return;
 		const sessionRemaining = getSessionRemaining();
 		if (sessionRemaining > 0) {
-			api$2.statusPanel.setSessionStatus(sessionRemaining <= SESSION_REFRESH_BUFFER_MS ? "expiring" : "active", sessionRemaining);
+			api$3.statusPanel.setSessionStatus(sessionRemaining <= SESSION_REFRESH_BUFFER_MS ? "expiring" : "active", sessionRemaining);
 			return;
 		}
 		const accessRemaining = currentExpiresAt - Date.now();
 		if (currentRefreshExpiresAt <= 0 && accessRemaining > 0) {
-			api$2.statusPanel.setSessionStatus(accessRemaining <= ACCESS_REFRESH_BUFFER_MS ? "expiring" : "active", accessRemaining);
+			api$3.statusPanel.setSessionStatus(accessRemaining <= ACCESS_REFRESH_BUFFER_MS ? "expiring" : "active", accessRemaining);
 			return;
 		}
 		emitTokenExpired();
@@ -1439,7 +1483,7 @@ mat-expansion-panel {
 	function emitTokenExpired() {
 		if (sessionExpiredEmitted) return;
 		sessionExpiredEmitted = true;
-		api$2?.bus.emit("token:expired", {});
+		api$3?.bus.emit("token:expired", {});
 	}
 	function getStoredAccessToken() {
 		try {
@@ -1450,7 +1494,7 @@ mat-expansion-panel {
 	}
 	function hasStoredAccessToken() {
 		if (getStoredAccessToken()) return true;
-		if (!sessionExpiredEmitted) api$2?.logger.warn("[session-debug] access token missing from sessionStorage, session lost");
+		if (!sessionExpiredEmitted) api$3?.logger.warn("[session-debug] access token missing from sessionStorage, session lost");
 		emitTokenExpired();
 		return false;
 	}
@@ -1470,12 +1514,12 @@ mat-expansion-panel {
 			const visibilityEvent = typeof window.Event === "function" ? new window.Event("visibilitychange") : new Event("visibilitychange");
 			document.dispatchEvent(visibilityEvent);
 		} catch (err) {
-			api$2?.logger.warn("[session-debug] failed to dispatch Neptun visibility refresh:", err);
+			api$3?.logger.warn("[session-debug] failed to dispatch Neptun visibility refresh:", err);
 		}
 		try {
 			dispatchNeptunActivityEvent();
 		} catch (err) {
-			api$2?.logger.warn("[session-debug] failed to dispatch Neptun activity refresh:", err);
+			api$3?.logger.warn("[session-debug] failed to dispatch Neptun activity refresh:", err);
 		}
 	}
 	function stopWatchdog() {
@@ -1498,52 +1542,52 @@ mat-expansion-panel {
 	}
 	function startWatchdog() {
 		if (watchdogTimer !== null) return;
-		api$2?.logger.info("[session-debug] startWatchdog: starting 15s interval");
+		api$3?.logger.info("[session-debug] startWatchdog: starting 15s interval");
 		watchdogTimer = setInterval(() => {
-			if (!currentExpiresAt || !api$2) return;
+			if (!currentExpiresAt || !api$3) return;
 			if (keepAliveInFlight) return;
 			if (!hasStoredAccessToken()) return;
 			const decision = getRefreshDecision();
-			api$2.logger.info(`[session-debug] watchdog tick: access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}, accessBuffer=30s, sessionBuffer=150s`);
+			api$3.logger.info(`[session-debug] watchdog tick: access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}, accessBuffer=30s, sessionBuffer=150s`);
 			if (currentRefreshExpiresAt > 0 && decision.sessionRemainingMs <= 0) {
-				api$2.logger.warn("[session-debug] refresh token expired, session lost");
+				api$3.logger.warn("[session-debug] refresh token expired, session lost");
 				emitTokenExpired();
 				return;
 			}
 			if (decision.shouldRefresh && decision.reason) {
-				api$2.logger.info(`[session-debug] watchdog tick: ${decision.reason} is inside refresh buffer`);
+				api$3.logger.info(`[session-debug] watchdog tick: ${decision.reason} is inside refresh buffer`);
 				triggerKeepAlive(decision.reason);
-			} else api$2.logger.info("[session-debug] watchdog tick: token still fresh, skipping refresh");
+			} else api$3.logger.info("[session-debug] watchdog tick: token still fresh, skipping refresh");
 		}, WATCHDOG_INTERVAL_MS);
 	}
 	function startActivityPulse() {
 		if (activityPulseTimer !== null) return;
-		api$2?.logger.info("[session-debug] startActivityPulse: starting 4m native activity interval");
+		api$3?.logger.info("[session-debug] startActivityPulse: starting 4m native activity interval");
 		activityPulseTimer = setInterval(() => {
-			if (!currentExpiresAt || !api$2) return;
+			if (!currentExpiresAt || !api$3) return;
 			if (keepAliveInFlight) return;
 			if (!hasStoredAccessToken()) return;
 			const decision = getRefreshDecision();
 			if (currentRefreshExpiresAt > 0 && decision.sessionRemainingMs <= 0) {
-				api$2.logger.warn("[session-debug] activity pulse skipped because refresh token is expired");
+				api$3.logger.warn("[session-debug] activity pulse skipped because refresh token is expired");
 				emitTokenExpired();
 				return;
 			}
-			api$2.logger.info(`[session-debug] activity pulse: access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}`);
+			api$3.logger.info(`[session-debug] activity pulse: access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}`);
 			requestNeptunNativeRefresh();
 		}, ACTIVITY_PULSE_INTERVAL_MS);
 	}
 	function warnRegistrationRushLimit() {
 		const path = window.location.pathname.toLowerCase();
 		if (!path.includes("/subjects/registration") && !path.includes("/exams/overview/registration")) return;
-		api$2?.statusPanel.addMessage("warn", "Session keep-alive is best-effort; Neptun may still force logout during registration rushes.");
+		api$3?.statusPanel.addMessage("warn", "Session keep-alive is best-effort; Neptun may still force logout during registration rushes.");
 	}
 	function triggerKeepAlive(reason = "access-token") {
-		if (!api$2) return;
+		if (!api$3) return;
 		if (keepAliveInFlight) return;
 		const previousAccessToken = getStoredAccessToken();
 		if (!previousAccessToken) {
-			api$2.logger.warn("[session-debug] cannot refresh session: no access token in sessionStorage");
+			api$3.logger.warn("[session-debug] cannot refresh session: no access token in sessionStorage");
 			emitTokenExpired();
 			return;
 		}
@@ -1552,12 +1596,12 @@ mat-expansion-panel {
 		const accessRemainingMs = Math.max(0, currentExpiresAt - Date.now());
 		const sessionRemainingMs = getSessionRemaining();
 		const visibleRemainingMs = sessionRemainingMs >= 0 ? sessionRemainingMs : accessRemainingMs;
-		api$2.bus.emit("token:expiring", {
+		api$3.bus.emit("token:expiring", {
 			expiresAt: currentRefreshExpiresAt || currentExpiresAt,
 			remainingMs: visibleRemainingMs
 		});
-		api$2.statusPanel.setSessionStatus("refreshing");
-		api$2.logger.info(`[session-debug] requesting native Neptun refresh (${reason}) with access=${formatRemaining(accessRemainingMs)}, session=${formatRemaining(sessionRemainingMs)}`);
+		api$3.statusPanel.setSessionStatus("refreshing");
+		api$3.logger.info(`[session-debug] requesting native Neptun refresh (${reason}) with access=${formatRemaining(accessRemainingMs)}, session=${formatRemaining(sessionRemainingMs)}`);
 		requestNeptunNativeRefresh();
 		nativeRefreshSettleTimer = setTimeout(() => {
 			nativeRefreshSettleTimer = null;
@@ -1566,54 +1610,54 @@ mat-expansion-panel {
 			const latestRefreshExpiresAt = getRefreshExpiresAt();
 			if (payload && (latestAccessToken !== previousAccessToken || latestRefreshExpiresAt > previousRefreshExpiresAt)) {
 				keepAliveInFlight = false;
-				api$2?.logger.info("[session-debug] native Neptun refresh succeeded");
-				api$2?.bus.emit("token:acquired", payload);
+				api$3?.logger.info("[session-debug] native Neptun refresh succeeded");
+				api$3?.bus.emit("token:acquired", payload);
 				return;
 			}
 			keepAliveInFlight = false;
-			if (!api$2) return;
-			api$2.logger.warn("[session-debug] native Neptun refresh did not update stored tokens");
+			if (!api$3) return;
+			api$3.logger.warn("[session-debug] native Neptun refresh did not update stored tokens");
 			const sessionRemaining = getSessionRemaining();
 			const accessRemaining = currentExpiresAt - Date.now();
 			const retryWindowRemaining = sessionRemaining > 0 ? sessionRemaining : accessRemaining;
 			if (currentRefreshExpiresAt > 0 && sessionRemaining <= 0) {
-				api$2.logger.warn("refresh token expired and native session refresh failed, session lost");
+				api$3.logger.warn("refresh token expired and native session refresh failed, session lost");
 				emitTokenExpired();
 			} else if (currentRefreshExpiresAt <= 0 && accessRemaining <= 0) {
-				api$2.logger.warn("token has expired and native session refresh failed, session lost");
+				api$3.logger.warn("token has expired and native session refresh failed, session lost");
 				emitTokenExpired();
 			} else {
 				restoreSessionStatusAfterRefreshFailure();
 				if (retryWindowRemaining > 15e3) {
-					api$2.logger.info("session still valid, scheduling native refresh retry");
+					api$3.logger.info("session still valid, scheduling native refresh retry");
 					if (fallbackRetryTimer !== null) clearTimeout(fallbackRetryTimer);
 					fallbackRetryTimer = setTimeout(() => {
 						fallbackRetryTimer = null;
 						triggerKeepAlive(reason);
 					}, FALLBACK_RETRY_MS);
-				} else api$2.logger.info(`refresh window has only ${Math.round(retryWindowRemaining / 1e3)}s left, watchdog will handle`);
+				} else api$3.logger.info(`refresh window has only ${Math.round(retryWindowRemaining / 1e3)}s left, watchdog will handle`);
 			}
 		}, NATIVE_REFRESH_SETTLE_MS);
 	}
 	function onTokenAcquired(payload) {
 		if (!Number.isFinite(payload.expiresAt)) {
-			api$2?.logger.warn(`token:acquired expiresAt is not finite (${payload.expiresAt}), ignoring`);
+			api$3?.logger.warn(`token:acquired expiresAt is not finite (${payload.expiresAt}), ignoring`);
 			return;
 		}
 		currentExpiresAt = payload.expiresAt;
 		currentRefreshExpiresAt = payload.refreshExpiresAt || getStoredRefreshExpiresAt() || currentRefreshExpiresAt;
 		sessionExpiredEmitted = false;
-		api$2?.logger.info(`[session-debug] token acquired: access expires in ${Math.round((payload.expiresAt - Date.now()) / 1e3)}s, refresh expires in ${payload.refreshExpiresAt ? Math.round((payload.refreshExpiresAt - Date.now()) / 1e3) : "unknown"}s`);
+		api$3?.logger.info(`[session-debug] token acquired: access expires in ${Math.round((payload.expiresAt - Date.now()) / 1e3)}s, refresh expires in ${payload.refreshExpiresAt ? Math.round((payload.refreshExpiresAt - Date.now()) / 1e3) : "unknown"}s`);
 		if (fallbackRetryTimer !== null) {
 			clearTimeout(fallbackRetryTimer);
 			fallbackRetryTimer = null;
-			api$2?.logger.info("[session-debug] cleared pending fallback retry after token update");
+			api$3?.logger.info("[session-debug] cleared pending fallback retry after token update");
 		}
 		if (keepAliveInFlight && nativeRefreshSettleTimer !== null) {
 			clearTimeout(nativeRefreshSettleTimer);
 			nativeRefreshSettleTimer = null;
 			keepAliveInFlight = false;
-			api$2?.logger.info("[session-debug] native refresh observed by token watcher");
+			api$3?.logger.info("[session-debug] native refresh observed by token watcher");
 		}
 		startWatchdog();
 		startActivityPulse();
@@ -1621,26 +1665,26 @@ mat-expansion-panel {
 	function hydrateFromSessionStorage() {
 		const payload = getExistingTokenPayload();
 		if (!payload) {
-			api$2?.logger.info("[session-debug] initialize: no existing token found in sessionStorage");
+			api$3?.logger.info("[session-debug] initialize: no existing token found in sessionStorage");
 			return;
 		}
-		api$2?.logger.info(`[session-debug] initialize: recovered existing token with ${Math.round((payload.expiresAt - Date.now()) / 1e3)}s remaining`);
+		api$3?.logger.info(`[session-debug] initialize: recovered existing token with ${Math.round((payload.expiresAt - Date.now()) / 1e3)}s remaining`);
 		onTokenAcquired(payload);
 	}
 	function onVisibilityChange() {
 		try {
-			api$2?.logger.info(`[session-debug] onVisibilityChange: state="${document.visibilityState}"`);
+			api$3?.logger.info(`[session-debug] onVisibilityChange: state="${document.visibilityState}"`);
 			if (document.visibilityState !== "visible") return;
-			if (!currentExpiresAt || !api$2) return;
+			if (!currentExpiresAt || !api$3) return;
 			if (keepAliveInFlight) return;
 			const decision = getRefreshDecision();
-			api$2.logger.info(`[session-debug] onVisibilityChange: tab visible, access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}, accessBuffer=30s, sessionBuffer=150s`);
+			api$3.logger.info(`[session-debug] onVisibilityChange: tab visible, access=${formatRemaining(decision.accessRemainingMs)}, session=${formatRemaining(decision.sessionRemainingMs)}, accessBuffer=30s, sessionBuffer=150s`);
 			if (decision.shouldRefresh && decision.reason) {
-				api$2.logger.info(`[session-debug] onVisibilityChange: ${decision.reason} near expiry, triggering keep-alive immediately`);
+				api$3.logger.info(`[session-debug] onVisibilityChange: ${decision.reason} near expiry, triggering keep-alive immediately`);
 				triggerKeepAlive(decision.reason);
 			}
 		} catch (err) {
-			api$2?.logger.error("error in visibility change handler:", err);
+			api$3?.logger.error("error in visibility change handler:", err);
 		}
 	}
 	function suppressSessionTimeoutModals() {
@@ -1654,8 +1698,8 @@ mat-expansion-panel {
 				const isSessionDialog = (dialogText.includes("session") || dialogText.includes("munkamenet")) && (dialogText.includes("lejar") || dialogText.includes("expir") || dialogText.includes("timeout") || dialogText.includes("idotullepes") || dialogText.includes("kijelentkezes") || /\d+\s*(perc|sec|mp|masodperc)/.test(dialogText));
 				const isExtendButton = text === "ok" || text === "igen" || text.includes("extend") || text.includes("meghosszabbit") || text.includes("folytat") || text.includes("marad");
 				if (isSessionDialog && isExtendButton) {
-					api$2?.logger.info(`[session-debug] suppressing session timeout modal, clicking: ${rawText}`);
-					api$2?.statusPanel.addMessage("info", "Session timeout dialog dismissed");
+					api$3?.logger.info(`[session-debug] suppressing session timeout modal, clicking: ${rawText}`);
+					api$3?.statusPanel.addMessage("info", "Session timeout dialog dismissed");
 					btn.click();
 					return;
 				}
@@ -1674,14 +1718,14 @@ mat-expansion-panel {
 			return true;
 		},
 		initialize(moduleApi) {
-			api$2 = moduleApi;
-			unsubscribe = api$2.bus.on("token:acquired", onTokenAcquired);
+			api$3 = moduleApi;
+			unsubscribe = api$3.bus.on("token:acquired", onTokenAcquired);
 			visibilityHandler = onVisibilityChange;
 			document.addEventListener("visibilitychange", visibilityHandler);
 			suppressSessionTimeoutModals();
 			hydrateFromSessionStorage();
 			warnRegistrationRushLimit();
-			api$2.logger.info("initialized, waiting for token from sessionStorage watcher");
+			api$3.logger.info("initialized, waiting for token from sessionStorage watcher");
 		},
 		dispose() {
 			stopWatchdog();
@@ -1697,19 +1741,19 @@ mat-expansion-panel {
 			currentExpiresAt = 0;
 			currentRefreshExpiresAt = 0;
 			sessionExpiredEmitted = false;
-			api$2 = null;
+			api$3 = null;
 		}
 	};
 	var WAIT_TIMEOUT_MS = 5e3;
-	var STORAGE_KEY$1 = "courseSelections";
-	var api$1 = null;
+	var STORAGE_KEY$2 = "courseSelections";
+	var api$2 = null;
 	var isEnrolling = false;
 	var routeUnsub = null;
 	function getApi$1() {
-		return api$1;
+		return api$2;
 	}
 	function setApi$1(value) {
-		api$1 = value;
+		api$2 = value;
 	}
 	function getIsEnrolling() {
 		return isEnrolling;
@@ -1731,12 +1775,12 @@ mat-expansion-panel {
 	async function saveSelections(selections) {
 		const api = getApi$1();
 		if (!api) return;
-		await api.storage.setForDomain(STORAGE_KEY$1, selections);
+		await api.storage.setForDomain(STORAGE_KEY$2, selections);
 	}
 	async function clearSelections() {
 		const api = getApi$1();
 		if (!api) return;
-		await api.storage.setForDomain(STORAGE_KEY$1, {});
+		await api.storage.setForDomain(STORAGE_KEY$2, {});
 	}
 	async function removeSingleSubject(subjectCode) {
 		const api = getApi$1();
@@ -2823,19 +2867,19 @@ mat-expansion-panel {
 			setApi$1(null);
 		}
 	};
-	var STORAGE_KEY = "examPreferences";
+	var STORAGE_KEY$1 = "examPreferences";
 	var HIGHLIGHT_STYLE = "background-color: rgba(76, 175, 80, 0.15) !important; border-left: 3px solid #4caf50 !important;";
-	var api = null;
+	var api$1 = null;
 	var tableObserver = null;
 	var debounceTimer = null;
 	var isDisposed = false;
 	var isEnrollmentInProgress = false;
 	var cachedSubjectCode = void 0;
 	function getApi() {
-		return api;
+		return api$1;
 	}
 	function setApi(value) {
-		api = value;
+		api$1 = value;
 	}
 	function getTableObserver() {
 		return tableObserver;
@@ -3203,7 +3247,7 @@ mat-expansion-panel {
 	async function savePreferences(prefs) {
 		const api = getApi();
 		if (!api) return;
-		await api.storage.setForDomain(STORAGE_KEY, prefs);
+		await api.storage.setForDomain(STORAGE_KEY$1, prefs);
 	}
 	var CONFIRM_BUTTON_WAIT_MS = 5e3;
 	var CONFIRM_BUTTON_POLL_MS = 50;
@@ -3953,6 +3997,132 @@ mat-expansion-panel {
 			setApi(null);
 		}
 	};
+	var STORAGE_KEY = "versionWatch";
+	var RETEST_DETAIL = "Retest Course Store, Course Rush, Exam Signup, Exam Rush, and Infinite Session.";
+	var api = null;
+	var observer = null;
+	var checkInFlight = false;
+	function normalizeText(text) {
+		return text.replace(/\s+/g, " ").trim();
+	}
+	function parseNeptunVersionText(text) {
+		const raw = normalizeText(text);
+		const match = raw.match(/(?:verzió|verzio|version)\s*:\s*([^\s(]+)(?:\s*\(([^)]+)\))?/i);
+		if (!match) return null;
+		return {
+			raw,
+			version: match[1],
+			buildTime: match[2]
+		};
+	}
+	function findNeptunVersion(doc = document) {
+		const direct = doc.querySelector(".footer__version");
+		const directVersion = direct ? parseNeptunVersionText(direct.textContent ?? "") : null;
+		if (directVersion) return directVersion;
+		const candidates = doc.querySelectorAll("[class*=\"version\"], footer");
+		for (const candidate of Array.from(candidates)) {
+			const version = parseNeptunVersionText(candidate.textContent ?? "");
+			if (version) return version;
+		}
+		return null;
+	}
+	async function acknowledgeVersion(current) {
+		if (!api) return;
+		const state = await api.storage.getForDomain(STORAGE_KEY);
+		await api.storage.setForDomain(STORAGE_KEY, {
+			lastSeenRaw: current.raw,
+			lastSeenVersion: current.version,
+			acknowledgedRaw: current.raw,
+			previousRaw: state?.previousRaw
+		});
+		api.statusPanel.setVersionWarning(null);
+		api.statusPanel.addMessage("info", "Neptun version marked as retested.");
+	}
+	function showWarning(current, state, semanticChanged = state.lastSeenVersion !== current.version) {
+		if (!api) return;
+		api.statusPanel.setVersionWarning({
+			title: semanticChanged ? "Neptun version changed" : "Neptun build changed",
+			detail: semanticChanged ? RETEST_DETAIL : "Quick smoke test recommended.",
+			previous: state.previousRaw,
+			current: current.raw,
+			actionLabel: "Mark Retested",
+			onAction: () => acknowledgeVersion(current)
+		});
+		api.statusPanel.addMessage("warn", semanticChanged ? "Neptun version changed. Retest NPU features." : "Neptun build changed.");
+		api.statusPanel.expand();
+	}
+	async function checkCurrentVersion() {
+		if (!api || checkInFlight) return false;
+		const current = findNeptunVersion();
+		if (!current) return false;
+		checkInFlight = true;
+		try {
+			const state = await api.storage.getForDomain(STORAGE_KEY);
+			if (!state) {
+				await api.storage.setForDomain(STORAGE_KEY, {
+					lastSeenRaw: current.raw,
+					lastSeenVersion: current.version,
+					acknowledgedRaw: current.raw
+				});
+				api.logger.info(`stored initial Neptun version: ${current.raw}`);
+				return true;
+			}
+			if (state.lastSeenRaw !== current.raw) {
+				const semanticChanged = state.lastSeenVersion !== current.version;
+				const nextState = {
+					lastSeenRaw: current.raw,
+					lastSeenVersion: current.version,
+					acknowledgedRaw: state.acknowledgedRaw,
+					previousRaw: state.lastSeenRaw
+				};
+				await api.storage.setForDomain(STORAGE_KEY, nextState);
+				showWarning(current, nextState, semanticChanged);
+				return true;
+			}
+			if (state.acknowledgedRaw !== current.raw) {
+				showWarning(current, state);
+				return true;
+			}
+			api.statusPanel.setVersionWarning(null);
+			return true;
+		} finally {
+			checkInFlight = false;
+		}
+	}
+	function startObserver() {
+		if (observer || !document.body) return;
+		observer = new MutationObserver(() => {
+			checkCurrentVersion().then((found) => {
+				if (found) {
+					observer?.disconnect();
+					observer = null;
+				}
+			});
+		});
+		observer.observe(document.body, {
+			childList: true,
+			subtree: true
+		});
+	}
+	var versionWatchModule = {
+		id: "version-watch",
+		name: "Version Watch",
+		description: "Warns when the Neptun footer version changes so NPU can be retested",
+		shouldActivate(_context) {
+			return true;
+		},
+		async initialize(moduleApi) {
+			api = moduleApi;
+			if (!await checkCurrentVersion()) startObserver();
+		},
+		dispose() {
+			observer?.disconnect();
+			observer = null;
+			checkInFlight = false;
+			api?.statusPanel.setVersionWarning(null);
+			api = null;
+		}
+	};
 	var CONSENT_KEY = "consentAccepted";
 	async function hasConsent(storage) {
 		return await storage.getForDomain(CONSENT_KEY) === true;
@@ -4135,6 +4305,7 @@ mat-expansion-panel {
 		}, themeInitial);
 		const stopInterceptor = setupInterceptor(bus, createLogger("interceptor"));
 		const registry = createModuleRegistry(bus, gmStorage, statusPanel);
+		registry.register(versionWatchModule);
 		registry.register(infiniteSessionModule);
 		registry.register(courseStoreModule);
 		registry.register(examSignupModule);

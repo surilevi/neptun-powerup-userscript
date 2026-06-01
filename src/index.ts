@@ -12,6 +12,7 @@ import { infiniteSessionModule } from './modules/infinite-session'
 import { courseStoreModule } from './modules/course-store'
 import { examSignupModule } from './modules/exam-signup'
 import { pinkModeModule } from './modules/pink-mode'
+import { versionWatchModule } from './modules/version-watch'
 import type { ThemeSettings } from './modules/pink-mode'
 import { DEFAULT_THEME } from './modules/pink-mode'
 import { hasConsent, storeConsent, resetConsent, showConsentDialog } from './core/consent'
@@ -137,6 +138,7 @@ async function main(): Promise<void> {
 
   // Register modules
   const registry = createModuleRegistry(bus, gmStorage, statusPanel)
+  registry.register(versionWatchModule)
   registry.register(infiniteSessionModule)
   registry.register(courseStoreModule)
   registry.register(examSignupModule)
