@@ -23,6 +23,7 @@ export function createModuleRegistry(
   const panel: StatusPanel = statusPanel ?? {
     setSessionStatus: () => {},
     addMessage: () => {},
+    setVersionWarning: () => {},
     setModuleContent: () => {},
     setModuleContentElement: () => {},
     expand: () => {},
