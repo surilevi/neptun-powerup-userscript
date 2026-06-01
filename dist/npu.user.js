@@ -21,7 +21,7 @@
 // ==/UserScript==
 
 (function() {
-  'use strict';
+	"use strict";
 	function createEventBus() {
 		const handlers = new Map();
 		const wildcards = new Map();
