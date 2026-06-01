@@ -34,6 +34,7 @@ function createMockApi(): ModuleApi {
     statusPanel: {
       setSessionStatus: vi.fn(),
       addMessage: vi.fn(),
+      setVersionWarning: vi.fn(),
       setModuleContent: vi.fn(),
       setModuleContentElement: vi.fn(),
       expand: vi.fn(),

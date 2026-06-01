@@ -18,6 +18,15 @@ export interface RushModeInitialState {
   examRush: boolean
 }
 
+export interface VersionWarning {
+  title: string
+  detail: string
+  current: string
+  previous?: string
+  actionLabel: string
+  onAction: () => void | Promise<void>
+}
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -28,6 +37,7 @@ export interface StatusPanel {
     remainingMs?: number,
   ): void
   addMessage(level: 'info' | 'warn' | 'error', text: string): void
+  setVersionWarning(warning: VersionWarning | null): void
   setModuleContent(text: string): void
   setModuleContentElement(element: HTMLElement): void
   expand(): void
@@ -149,6 +159,7 @@ export function createStatusPanel(
   let headerDot: HTMLElement | null = null
   let sessionLine: HTMLElement | null = null
   let messageList: HTMLElement | null = null
+  let versionWarningSection: HTMLElement | null = null
   let moduleSection: HTMLElement | null = null
   let minimizeBtn: HTMLElement | null = null
   let courseRushToggle: HTMLInputElement | null = null
@@ -422,6 +433,16 @@ export function createStatusPanel(
     examLabel.appendChild(examLabelText)
     rushSection.appendChild(examLabel)
 
+    // Version change warning section
+    versionWarningSection = document.createElement('div')
+    versionWarningSection.id = 'npu-version-warning'
+    versionWarningSection.style.cssText = `
+      display: none;
+      padding: 8px 14px;
+      border-bottom: 1px solid ${COLORS.border};
+      flex-shrink: 0;
+    `
+
     // Message feed section
     const messageFeedSection = document.createElement('div')
     messageFeedSection.style.cssText = `
@@ -448,6 +469,7 @@ export function createStatusPanel(
     normalContent.id = 'npu-normal-content'
     normalContent.appendChild(sessionSection)
     normalContent.appendChild(rushSection)
+    normalContent.appendChild(versionWarningSection)
     normalContent.appendChild(messageFeedSection)
     normalContent.appendChild(moduleSection)
     panel.appendChild(normalContent)
@@ -681,6 +703,49 @@ export function createStatusPanel(
     }
   }
 
+  function setVersionWarning(warning: VersionWarning | null): void {
+    if (!versionWarningSection) return
+
+    while (versionWarningSection.firstChild) {
+      versionWarningSection.removeChild(versionWarningSection.firstChild)
+    }
+
+    if (!warning) {
+      versionWarningSection.style.display = 'none'
+      return
+    }
+
+    versionWarningSection.style.display = 'block'
+
+    const title = document.createElement('div')
+    title.style.cssText = `font-size: 12px; font-weight: 700; color: ${COLORS.yellow}; margin-bottom: 4px;`
+    title.textContent = warning.title
+    versionWarningSection.appendChild(title)
+
+    const detail = document.createElement('div')
+    detail.style.cssText = `font-size: 11px; color: ${COLORS.text}; margin-bottom: 6px;`
+    detail.textContent = warning.detail
+    versionWarningSection.appendChild(detail)
+
+    const versions = document.createElement('div')
+    versions.style.cssText = `font-size: 10px; color: ${COLORS.textMuted}; line-height: 1.4; margin-bottom: 8px; word-break: break-word;`
+    versions.textContent = warning.previous
+      ? `Previous: ${warning.previous} | Current: ${warning.current}`
+      : `Current: ${warning.current}`
+    versionWarningSection.appendChild(versions)
+
+    const action = document.createElement('button')
+    action.type = 'button'
+    action.style.cssText = `padding: 5px 10px; background: ${COLORS.yellow}; color: #1a1a2e; border: 0; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 600;`
+    action.textContent = warning.actionLabel
+    action.addEventListener('click', async () => {
+      action.setAttribute('disabled', 'true')
+      action.style.opacity = '0.7'
+      await warning.onAction()
+    })
+    versionWarningSection.appendChild(action)
+  }
+
   // --- Countdown ticker ---
 
   function startCountdown(): void {
@@ -848,6 +913,7 @@ export function createStatusPanel(
     headerDot = null
     sessionLine = null
     messageList = null
+    versionWarningSection = null
     moduleSection = null
     minimizeBtn = null
     courseRushToggle = null
@@ -930,6 +996,7 @@ export function createStatusPanel(
   return {
     setSessionStatus,
     addMessage,
+    setVersionWarning,
     setModuleContent,
     setModuleContentElement,
     expand,
