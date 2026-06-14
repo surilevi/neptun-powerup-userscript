@@ -3328,6 +3328,12 @@ mat-expansion-panel {
 		const normalized = normalizeButtonText(text);
 		return normalized.includes("megerosit") || normalized.includes("confirm") || normalized === "igen" || normalized === "ok";
 	}
+	function isExamConfirmationDialogText(text) {
+		const normalized = normalizeButtonText(text);
+		const mentionsExam = normalized.includes("vizsga") || normalized.includes("exam");
+		const mentionsEnrollment = normalized.includes("jelentkez") || normalized.includes("felvetel") || normalized.includes("registration") || normalized.includes("sign up") || normalized.includes("enroll");
+		return mentionsExam && mentionsEnrollment;
+	}
 	function isButtonInteractable(button) {
 		if (!button.isConnected) return false;
 		if (button.hasAttribute("disabled")) return false;
@@ -3338,9 +3344,12 @@ mat-expansion-panel {
 		return style.display !== "none" && style.visibility !== "hidden" && style.pointerEvents !== "none";
 	}
 	function findConfirmButtonElement() {
-		const overlay = document.querySelector(".cdk-overlay-container");
-		if (!overlay) return null;
-		return Array.from(overlay.querySelectorAll("button")).find((button) => isConfirmButtonText(button.textContent ?? "") && isButtonInteractable(button)) ?? null;
+		const overlays = Array.from(document.querySelectorAll(".cdk-overlay-container"));
+		if (overlays.length === 0) return null;
+		return overlays.flatMap((overlay) => Array.from(overlay.querySelectorAll("button"))).find((button) => {
+			if (!isConfirmButtonText(button.textContent ?? "") || !isButtonInteractable(button)) return false;
+			return isExamConfirmationDialogText(button.closest(".cdk-overlay-pane, .mat-mdc-dialog-container")?.textContent ?? button.parentElement?.textContent ?? "");
+		}) ?? null;
 	}
 	function waitForConfirmButton(timeoutMs = CONFIRM_BUTTON_WAIT_MS, stopWhen) {
 		return new Promise((resolve) => {
