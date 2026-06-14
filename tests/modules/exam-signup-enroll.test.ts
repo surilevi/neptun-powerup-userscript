@@ -53,6 +53,26 @@ function createMockApi(): ModuleApi {
   }
 }
 
+function appendOverlayDialog(
+  text: string,
+  buttonText: string,
+  disabled = false,
+): HTMLButtonElement {
+  const overlay = document.createElement('div')
+  overlay.className = 'cdk-overlay-container'
+  const dialog = document.createElement('div')
+  dialog.className = 'cdk-overlay-pane'
+  const message = document.createElement('p')
+  message.textContent = text
+  const button = document.createElement('button')
+  button.textContent = buttonText
+  button.disabled = disabled
+  dialog.append(message, button)
+  overlay.appendChild(dialog)
+  document.body.appendChild(overlay)
+  return button
+}
+
 describe('exam-signup confirmation wait', () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -70,12 +90,7 @@ describe('exam-signup confirmation wait', () => {
     const promise = waitForConfirmButton(1000)
 
     setTimeout(() => {
-      const overlay = document.createElement('div')
-      overlay.className = 'cdk-overlay-container'
-      confirmBtn = document.createElement('button')
-      confirmBtn.textContent = 'Igen'
-      overlay.appendChild(confirmBtn)
-      document.body.appendChild(overlay)
+      confirmBtn = appendOverlayDialog('Vizsga jelentkezes megerositese', 'Igen')
     }, 125)
 
     await vi.advanceTimersByTimeAsync(125)
@@ -89,12 +104,7 @@ describe('exam-signup confirmation wait', () => {
     const promise = waitForConfirmButton()
 
     setTimeout(() => {
-      const overlay = document.createElement('div')
-      overlay.className = 'cdk-overlay-container'
-      confirmBtn = document.createElement('button')
-      confirmBtn.textContent = 'Confirm'
-      overlay.appendChild(confirmBtn)
-      document.body.appendChild(overlay)
+      confirmBtn = appendOverlayDialog('Exam registration confirmation', 'Confirm')
     }, 2500)
 
     await vi.advanceTimersByTimeAsync(2500)
@@ -105,14 +115,8 @@ describe('exam-signup confirmation wait', () => {
   it('waits until the confirmation button is interactable', async () => {
     vi.useFakeTimers()
 
-    const overlay = document.createElement('div')
-    overlay.className = 'cdk-overlay-container'
-    const confirmBtn = document.createElement('button')
+    const confirmBtn = appendOverlayDialog('Vizsga jelentkezes megerositese', 'Megerősít', true)
     confirmBtn.textContent = 'Megerősít'
-    confirmBtn.disabled = true
-    overlay.appendChild(confirmBtn)
-    document.body.appendChild(overlay)
-
     const promise = waitForConfirmButton(1000)
     let resolved = false
     promise.then(() => {
@@ -123,6 +127,33 @@ describe('exam-signup confirmation wait', () => {
     expect(resolved).toBe(false)
 
     confirmBtn.disabled = false
+    await vi.advanceTimersByTimeAsync(50)
+
+    await expect(promise).resolves.toBe(confirmBtn)
+  })
+
+  it('ignores generic confirmation dialogs that are not about exam registration', async () => {
+    vi.useFakeTimers()
+    const promise = waitForConfirmButton(1000)
+
+    setTimeout(() => {
+      appendOverlayDialog('Session timeout warning', 'OK')
+    }, 100)
+
+    await vi.advanceTimersByTimeAsync(200)
+    let resolved = false
+    promise.then(() => {
+      resolved = true
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(resolved).toBe(false)
+
+    let confirmBtn: HTMLButtonElement | null = null
+    setTimeout(() => {
+      confirmBtn = appendOverlayDialog('Exam registration confirmation', 'OK')
+    }, 100)
+
+    await vi.advanceTimersByTimeAsync(100)
     await vi.advanceTimersByTimeAsync(50)
 
     await expect(promise).resolves.toBe(confirmBtn)

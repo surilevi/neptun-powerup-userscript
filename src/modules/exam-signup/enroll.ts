@@ -159,6 +159,19 @@ function isConfirmButtonText(text: string): boolean {
   )
 }
 
+function isExamConfirmationDialogText(text: string): boolean {
+  const normalized = normalizeButtonText(text)
+  const mentionsExam = normalized.includes('vizsga') || normalized.includes('exam')
+  const mentionsEnrollment =
+    normalized.includes('jelentkez') ||
+    normalized.includes('felvetel') ||
+    normalized.includes('registration') ||
+    normalized.includes('sign up') ||
+    normalized.includes('enroll')
+
+  return mentionsExam && mentionsEnrollment
+}
+
 function isButtonInteractable(button: HTMLElement): boolean {
   if (!button.isConnected) return false
   if (button.hasAttribute('disabled')) return false
@@ -174,13 +187,22 @@ function isButtonInteractable(button: HTMLElement): boolean {
 }
 
 function findConfirmButtonElement(): HTMLElement | null {
-  const overlay = document.querySelector('.cdk-overlay-container')
-  if (!overlay) return null
+  const overlays = Array.from(document.querySelectorAll('.cdk-overlay-container'))
+  if (overlays.length === 0) return null
 
-  const buttons = Array.from(overlay.querySelectorAll('button'))
-  const btn = buttons.find(
-    (button) => isConfirmButtonText(button.textContent ?? '') && isButtonInteractable(button),
-  )
+  const buttons = overlays.flatMap((overlay) => Array.from(overlay.querySelectorAll('button')))
+  const btn = buttons.find((button) => {
+    if (!isConfirmButtonText(button.textContent ?? '') || !isButtonInteractable(button)) {
+      return false
+    }
+
+    const dialogText =
+      button.closest('.cdk-overlay-pane, .mat-mdc-dialog-container')?.textContent ??
+      button.parentElement?.textContent ??
+      ''
+
+    return isExamConfirmationDialogText(dialogText)
+  })
   return (btn as HTMLElement) ?? null
 }
 
