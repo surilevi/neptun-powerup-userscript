@@ -13,9 +13,10 @@ import {
 import { buildRegisteredExamCalendarEntries, renderExamCalendar } from './calendar'
 import { loadPreferences, savePreferences } from './storage'
 import { autoEnrollSaved } from './enroll'
+import { clearExamPreview, previewSavedExams } from './preview'
 import { isDebugEnabled } from '../../utils/debug'
 
-const EXAM_UI_BUILD = '3.2.0 exam-calendar'
+const EXAM_UI_BUILD = '3.3.0 safe-preview'
 
 async function savePreferredExam(
   subjectCode: string,
@@ -40,12 +41,15 @@ async function clearPreference(subjectCode: string): Promise<void> {
   api?.logger.info(`cleared exam preference for ${subjectCode}`)
   api?.statusPanel.addMessage('info', 'Saved exam date cleared.')
   clearHighlights()
+  clearExamPreview()
   await renderModuleUI()
 }
 
 export async function renderModuleUI(): Promise<void> {
   const api = getApi()
   if (!api) return
+
+  clearExamPreview()
 
   const container = document.createElement('div')
   container.style.cssText = 'font-size: 12px;'
@@ -108,6 +112,32 @@ export async function renderModuleUI(): Promise<void> {
   }
 
   const allPrefsEntries = Object.entries(prefs)
+
+  if (allPrefsEntries.length > 0) {
+    const previewBtn = document.createElement('button')
+    previewBtn.style.cssText = `${btnStyle} background: #37474f; color: white;`
+    previewBtn.textContent = 'Preview Saved'
+    previewBtn.title = 'Highlight saved exam matches and enrollment buttons without clicking'
+    previewBtn.addEventListener('click', () => {
+      previewSavedExams().catch((err) => api?.logger.error('exam preview failed:', err))
+    })
+    container.appendChild(previewBtn)
+
+    const clearPreviewBtn = document.createElement('button')
+    clearPreviewBtn.style.cssText = `${btnStyle} background: #455a64; color: white;`
+    clearPreviewBtn.textContent = 'Clear Preview'
+    clearPreviewBtn.addEventListener('click', () => {
+      clearExamPreview()
+      api.statusPanel.addMessage('info', 'Exam preview cleared.')
+    })
+    container.appendChild(clearPreviewBtn)
+
+    const previewHint = document.createElement('div')
+    previewHint.style.cssText = 'margin-top: 4px; font-size: 10px; color: #6a7a8a;'
+    previewHint.textContent = 'Preview only highlights matches; it never clicks enrollment buttons.'
+    container.appendChild(previewHint)
+  }
+
   const examRows = getExamRows()
   const registeredCalendarEntries = buildRegisteredExamCalendarEntries(
     examRows.map((row) => ({

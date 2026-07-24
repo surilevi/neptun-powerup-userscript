@@ -13,6 +13,7 @@ import { getSubjectCode, clearHighlights } from './dom'
 import { loadPreferences } from './storage'
 import { waitForExamTable, autoEnrollSaved } from './enroll'
 import { renderModuleUI } from './ui'
+import { clearExamPreview } from './preview'
 import { delay } from '../../utils/async'
 
 const EXAM_TABLE_WAIT_MS = 30_000
@@ -74,6 +75,7 @@ export const examSignupModule: NpuModule = {
     }
     getTableObserver()?.disconnect()
     setTableObserver(null)
+    clearExamPreview()
     clearHighlights()
     document.querySelectorAll('.npu-exam-save-btn').forEach((b) => b.remove())
     document.querySelectorAll('.npu-exam-save-slot').forEach((slot) => slot.remove())

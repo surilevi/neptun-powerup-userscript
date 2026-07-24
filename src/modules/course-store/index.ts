@@ -4,6 +4,7 @@ import { loadSelections } from './storage'
 import { autoSearchSubjects, getSubjectPanels, waitForSubjectListing } from './dom'
 import { loadAndEnroll } from './enroll'
 import { renderModuleUI } from './ui'
+import { clearCoursePreview } from './preview'
 
 export const courseStoreModule: NpuModule = {
   id: 'course-store',
@@ -126,6 +127,7 @@ export const courseStoreModule: NpuModule = {
 
   dispose(): void {
     setIsEnrolling(false)
+    clearCoursePreview()
     getRouteUnsub()?.()
     setRouteUnsub(null)
     setApi(null)

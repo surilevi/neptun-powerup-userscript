@@ -3,9 +3,10 @@ import { loadSelections, clearSelections, removeSingleSubject } from './storage'
 import { saveCurrentSelections } from './save'
 import { loadStoredSelections } from './load'
 import { loadAndEnroll, quickEnrollAll } from './enroll'
+import { clearCoursePreview, previewSavedCourses } from './preview'
 import { isDebugEnabled } from '../../utils/debug'
 
-const COURSE_UI_BUILD = '3.1.2 coursestore-select-a'
+const COURSE_UI_BUILD = '3.3.0 safe-preview'
 
 /**
  * Build and set the module content for the unified status panel.
@@ -14,6 +15,8 @@ const COURSE_UI_BUILD = '3.1.2 coursestore-select-a'
 export async function renderModuleUI(): Promise<void> {
   const api = getApi()
   if (!api) return
+
+  clearCoursePreview()
 
   const container = document.createElement('div')
   const debugEnabled = isDebugEnabled()
@@ -115,6 +118,24 @@ export async function renderModuleUI(): Promise<void> {
     })
     btnContainer.appendChild(loadBtn)
 
+    const previewBtn = document.createElement('button')
+    previewBtn.style.cssText = `${btnStyle} background: #37474f; color: white;`
+    previewBtn.textContent = 'Preview Saved'
+    previewBtn.title = 'Highlight saved course matches and enrollment buttons without clicking'
+    previewBtn.addEventListener('click', () => {
+      previewSavedCourses().catch((err) => api?.logger.error('course preview failed:', err))
+    })
+    btnContainer.appendChild(previewBtn)
+
+    const clearPreviewBtn = document.createElement('button')
+    clearPreviewBtn.style.cssText = `${btnStyle} background: #455a64; color: white;`
+    clearPreviewBtn.textContent = 'Clear Preview'
+    clearPreviewBtn.addEventListener('click', () => {
+      clearCoursePreview()
+      api.statusPanel.addMessage('info', 'Course preview cleared.')
+    })
+    btnContainer.appendChild(clearPreviewBtn)
+
     // Load & Enroll combo button — the registration rush button
     const loadEnrollBtn = document.createElement('button')
     loadEnrollBtn.style.cssText = `${btnStyle} background: #d84315; color: white; font-weight: bold;`
@@ -151,7 +172,8 @@ export async function renderModuleUI(): Promise<void> {
 
   const hint = document.createElement('div')
   hint.style.cssText = 'margin-top: 6px; font-size: 10px; color: #6a7a8a;'
-  hint.textContent = 'Expand subjects and select courses before saving.'
+  hint.textContent =
+    'Expand subjects and select courses before saving. Preview never clicks enrollment buttons.'
   container.appendChild(hint)
 
   if (debugEnabled) {
@@ -172,6 +194,7 @@ export async function renderModuleUI(): Promise<void> {
 async function handleClear(): Promise<void> {
   const api = getApi()
   await clearSelections()
+  clearCoursePreview()
   api?.logger.info('cleared all stored course selections')
   api?.statusPanel.addMessage('info', 'All stored selections cleared.')
   await renderModuleUI()

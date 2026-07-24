@@ -15,6 +15,7 @@ A script nem helyetted dönt, és nem kerül meg Neptun-szabályokat. A már kiv
 ## Mire jó?
 
 - `Course Store`: elmenti a kijelölt kurzusokat, később pedig visszatölti őket.
+- `Safe Preview`: a mentett kurzus- és vizsgatalálatokat, valamint a kapcsolódó felvételi gombokat kattintás nélkül kiemeli.
 - `Course Rush`: a mentett tárgyválasztást visszatölti, majd sorban megpróbálja felvenni a tárgyakat.
 - `Exam Planner`: naptárban mutatja a látható felvett és mentett vizsgaidőpontokat, és továbbra is el tud menteni egy választott időpontot későbbi jelentkezéshez.
 - `Exam Rush`: az aktuálisan látható vizsgaoldalon végigpróbálja a mentett vizsgacélokat.
