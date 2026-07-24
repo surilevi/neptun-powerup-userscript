@@ -4,6 +4,8 @@ import type { ModuleApi } from '../../src/types/modules'
 import { clearExamPreview, previewSavedExams } from '../../src/modules/exam-signup/preview'
 import { setApi, setCachedSubjectCode } from '../../src/modules/exam-signup/state'
 
+type ExamPreferences = Record<string, { date: string; type: string; courseCode: string }>
+
 function createMockApi(): ModuleApi {
   return {
     bus: {
@@ -65,6 +67,11 @@ function createMockApi(): ModuleApi {
       dispose: vi.fn(),
     },
   }
+}
+
+function setStoredExams(api: ModuleApi, preferences: ExamPreferences): void {
+  api.storage.getForDomain = async <T>(key: string): Promise<T | undefined> =>
+    (key === 'examPreferences' ? preferences : undefined) as T | undefined
 }
 
 describe('exam safe preview', () => {
@@ -159,5 +166,135 @@ describe('exam safe preview', () => {
 
     expect(document.querySelector('[data-npu-exam-preview]')).toBeNull()
     expect(document.querySelectorAll('tr')).toHaveLength(rowCount)
+  })
+
+  it('clears stale markers and reports an empty saved set without clicking', async () => {
+    await previewSavedExams()
+    setStoredExams(api, {})
+    const clickSpy = vi.fn()
+    document.querySelectorAll('button').forEach((button) => {
+      button.addEventListener('click', clickSpy)
+    })
+
+    const result = await previewSavedExams()
+
+    expect(result).toEqual({
+      savedExams: 0,
+      matchedExams: 0,
+      availableExams: 0,
+      matchedRows: 0,
+      enrollmentButtons: 0,
+      availableEnrollmentButtons: 0,
+      missing: [],
+    })
+    expect(document.querySelector('[data-npu-exam-preview]')).toBeNull()
+    expect(clickSpy).not.toHaveBeenCalled()
+    expect(api.statusPanel.addMessage).toHaveBeenLastCalledWith(
+      'info',
+      expect.stringContaining('No saved exams to preview'),
+    )
+  })
+
+  it('treats enrollment controls inside hidden containers as unavailable', async () => {
+    const visibleDate = document.querySelector('td')?.textContent?.trim() ?? ''
+    setStoredExams(api, {
+      ABC12DE345: {
+        date: visibleDate,
+        type: 'written',
+        courseCode: 'E1',
+      },
+    })
+    document.querySelector('table')?.setAttribute('hidden', '')
+
+    const result = await previewSavedExams()
+
+    expect(result).toMatchObject({
+      matchedExams: 1,
+      availableExams: 0,
+      enrollmentButtons: 2,
+      availableEnrollmentButtons: 0,
+    })
+    expect(document.querySelectorAll('[data-npu-exam-preview="unavailable-row"]')).toHaveLength(2)
+    expect(
+      document.querySelectorAll('[data-npu-exam-preview="unavailable-enrollment-button"]'),
+    ).toHaveLength(2)
+  })
+
+  it('marks registered and full saved exam rows unavailable without finding an enroll action', async () => {
+    setStoredExams(api, {
+      ABC12DE345: {
+        date: '2026. 06. 08. 08:00',
+        type: 'written',
+        courseCode: 'E1',
+      },
+      BMEVITMAD01: {
+        date: '2026. 06. 09. 08:00',
+        type: 'oral',
+        courseCode: 'V1',
+      },
+    })
+    document.body.innerHTML = `
+      <main>
+        <p>ABC12DE345</p>
+        <table>
+          <tr>
+            <td>2026. 06. 08. 08:00 registered</td>
+            <td>written</td><td>1 / 20</td><td>Teacher</td><td>E1</td>
+            <td><button>Leadas</button></td>
+          </tr>
+        </table>
+        <p>BMEVITMAD01</p>
+        <table>
+          <tr>
+            <td>2026. 06. 09. 08:00 Betelt</td>
+            <td>oral</td><td>20 / 20</td><td>Teacher</td><td>V1</td>
+            <td><button>Details</button></td>
+          </tr>
+        </table>
+      </main>
+    `
+    const clickSpy = vi.fn()
+    document.querySelectorAll('button').forEach((button) => {
+      button.addEventListener('click', clickSpy)
+    })
+
+    const result = await previewSavedExams()
+
+    expect(result).toMatchObject({
+      savedExams: 2,
+      matchedExams: 2,
+      availableExams: 0,
+      matchedRows: 2,
+      enrollmentButtons: 0,
+      availableEnrollmentButtons: 0,
+    })
+    expect(document.querySelectorAll('[data-npu-exam-preview="unavailable-row"]')).toHaveLength(2)
+    expect(clickSpy).not.toHaveBeenCalled()
+  })
+
+  it('requires an exact normalized saved date match', async () => {
+    setStoredExams(api, {
+      ABC12DE345: {
+        date: '2026. 06. 08. 09:00',
+        type: 'written',
+        courseCode: 'E1',
+      },
+    })
+
+    const result = await previewSavedExams()
+
+    expect(result.matchedExams).toBe(0)
+    expect(result.matchedRows).toBe(0)
+    expect(document.querySelector('[data-npu-exam-preview]')).toBeNull()
+  })
+
+  it('coalesces overlapping preview requests', async () => {
+    const first = previewSavedExams()
+    const second = previewSavedExams()
+
+    expect(second).toBe(first)
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(secondResult).toBe(firstResult)
+    expect(api.statusPanel.addMessage).toHaveBeenCalledTimes(1)
   })
 })

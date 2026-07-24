@@ -2660,8 +2660,21 @@ mat-expansion-panel {
 		api?.statusPanel.addMessage("info", `Saved ${newCount} subject${newCount === 1 ? "" : "s"}. Total stored: ${totalSubjects}.`);
 		await renderModuleUI$1();
 	}
+	function isElementAvailable(element) {
+		if (!element.isConnected) return false;
+		if (element instanceof HTMLButtonElement && element.disabled) return false;
+		let current = element;
+		while (current) {
+			if (current.hidden || current.hasAttribute("hidden") || current.hasAttribute("inert") || current.getAttribute("aria-hidden") === "true" || current.getAttribute("aria-disabled") === "true") return false;
+			const style = window.getComputedStyle(current);
+			if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.pointerEvents === "none") return false;
+			current = current.parentElement;
+		}
+		return true;
+	}
 	var PREVIEW_STYLE_ID$1 = "npu-course-preview-style";
 	var PREVIEW_ATTRIBUTE$1 = "data-npu-course-preview";
+	var previewInFlight$1 = null;
 	function normalizeCode(code) {
 		return code.replace(/\s+/g, "").toUpperCase();
 	}
@@ -2696,18 +2709,12 @@ mat-expansion-panel {
 	function findEnrollmentButton(panel) {
 		return Array.from(panel.querySelectorAll("button")).find((button) => isEnrollButtonText(button.textContent ?? "")) ?? null;
 	}
-	function isButtonAvailable$1(button) {
-		if (!button.isConnected || button.disabled || button.hasAttribute("disabled")) return false;
-		if (button.getAttribute("aria-disabled") === "true") return false;
-		const style = window.getComputedStyle(button);
-		return style.display !== "none" && style.visibility !== "hidden" && style.pointerEvents !== "none";
-	}
 	function clearCoursePreview() {
 		document.querySelectorAll(`[${PREVIEW_ATTRIBUTE$1}]`).forEach((element) => {
 			element.removeAttribute(PREVIEW_ATTRIBUTE$1);
 		});
 	}
-	async function previewSavedCourses() {
+	async function runCoursePreview() {
 		const api = getApi$1();
 		const selections = await loadSelections();
 		const entries = Object.entries(selections);
@@ -2764,7 +2771,7 @@ mat-expansion-panel {
 				continue;
 			}
 			result.enrollmentButtons++;
-			if (isButtonAvailable$1(enrollmentButton)) {
+			if (isElementAvailable(enrollmentButton)) {
 				result.availableEnrollmentButtons++;
 				enrollmentButton.setAttribute(PREVIEW_ATTRIBUTE$1, "enrollment-button");
 			} else {
@@ -2775,6 +2782,16 @@ mat-expansion-panel {
 		api?.logger.info("course preview result", result);
 		api?.statusPanel.addMessage(result.missing.length === 0 ? "info" : "warn", `Preview: ${result.matchedCourses}/${result.savedCourses} saved courses matched; ${result.availableEnrollmentButtons}/${result.enrollmentButtons} enrollment buttons available. No course selections or enrollment buttons were clicked.`);
 		return result;
+	}
+	function previewSavedCourses() {
+		if (previewInFlight$1) return previewInFlight$1;
+		const run = runCoursePreview();
+		previewInFlight$1 = run;
+		const clearInFlight = () => {
+			if (previewInFlight$1 === run) previewInFlight$1 = null;
+		};
+		run.then(clearInFlight, clearInFlight);
+		return run;
 	}
 	var COURSE_UI_BUILD = "3.3.0 safe-preview";
 	async function renderModuleUI$1() {
@@ -3958,6 +3975,7 @@ mat-expansion-panel {
 	}
 	var PREVIEW_STYLE_ID = "npu-exam-preview-style";
 	var PREVIEW_ATTRIBUTE = "data-npu-exam-preview";
+	var previewInFlight = null;
 	function ensurePreviewStyle() {
 		if (document.getElementById(PREVIEW_STYLE_ID)) return;
 		const style = document.createElement("style");
@@ -3982,18 +4000,12 @@ mat-expansion-panel {
   `;
 		document.head.appendChild(style);
 	}
-	function isButtonAvailable(button) {
-		if (!button.isConnected || button.disabled || button.hasAttribute("disabled")) return false;
-		if (button.getAttribute("aria-disabled") === "true") return false;
-		const style = window.getComputedStyle(button);
-		return style.display !== "none" && style.visibility !== "hidden" && style.pointerEvents !== "none";
-	}
 	function clearExamPreview() {
 		document.querySelectorAll(`[${PREVIEW_ATTRIBUTE}]`).forEach((element) => {
 			element.removeAttribute(PREVIEW_ATTRIBUTE);
 		});
 	}
-	async function previewSavedExams() {
+	async function runExamPreview() {
 		const api = getApi();
 		const preferences = await loadPreferences();
 		const entries = Object.entries(preferences);
@@ -4026,7 +4038,7 @@ mat-expansion-panel {
 			matchedSubjects.add(subjectCode);
 			result.matchedRows++;
 			if (info.felvetelBtn) result.enrollmentButtons++;
-			if (info.felvetelBtn && isButtonAvailable(info.felvetelBtn)) {
+			if (info.felvetelBtn && isElementAvailable(info.felvetelBtn)) {
 				result.availableEnrollmentButtons++;
 				availableSubjects.add(subjectCode);
 				row.setAttribute(PREVIEW_ATTRIBUTE, "row");
@@ -4043,6 +4055,16 @@ mat-expansion-panel {
 		api?.logger.info("exam preview result", result);
 		api?.statusPanel.addMessage(result.missing.length === 0 ? "info" : "warn", `Preview: ${result.matchedExams}/${result.savedExams} saved exams matched; ${result.availableEnrollmentButtons}/${result.enrollmentButtons} enrollment buttons available. No clicks were made.`);
 		return result;
+	}
+	function previewSavedExams() {
+		if (previewInFlight) return previewInFlight;
+		const run = runExamPreview();
+		previewInFlight = run;
+		const clearInFlight = () => {
+			if (previewInFlight === run) previewInFlight = null;
+		};
+		run.then(clearInFlight, clearInFlight);
+		return run;
 	}
 	var EXAM_UI_BUILD = "3.3.0 safe-preview";
 	async function savePreferredExam(subjectCode, date, type, courseCode) {

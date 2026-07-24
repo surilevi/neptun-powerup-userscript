@@ -6,11 +6,13 @@ import {
   isCourseSelected,
   isEnrollButtonText,
 } from './dom'
+import { isElementAvailable } from '../../utils/element-availability'
 import { getApi } from './state'
 import { loadSelections } from './storage'
 
 const PREVIEW_STYLE_ID = 'npu-course-preview-style'
 const PREVIEW_ATTRIBUTE = 'data-npu-course-preview'
+let previewInFlight: Promise<CoursePreviewResult> | null = null
 
 export interface CoursePreviewResult {
   savedSubjects: number
@@ -62,21 +64,13 @@ function findEnrollmentButton(panel: Element): HTMLButtonElement | null {
   return buttons.find((button) => isEnrollButtonText(button.textContent ?? '')) ?? null
 }
 
-function isButtonAvailable(button: HTMLButtonElement): boolean {
-  if (!button.isConnected || button.disabled || button.hasAttribute('disabled')) return false
-  if (button.getAttribute('aria-disabled') === 'true') return false
-
-  const style = window.getComputedStyle(button)
-  return style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none'
-}
-
 export function clearCoursePreview(): void {
   document.querySelectorAll(`[${PREVIEW_ATTRIBUTE}]`).forEach((element) => {
     element.removeAttribute(PREVIEW_ATTRIBUTE)
   })
 }
 
-export async function previewSavedCourses(): Promise<CoursePreviewResult> {
+async function runCoursePreview(): Promise<CoursePreviewResult> {
   const api = getApi()
   const selections = await loadSelections()
   const entries = Object.entries(selections)
@@ -150,7 +144,7 @@ export async function previewSavedCourses(): Promise<CoursePreviewResult> {
     }
 
     result.enrollmentButtons++
-    if (isButtonAvailable(enrollmentButton)) {
+    if (isElementAvailable(enrollmentButton)) {
       result.availableEnrollmentButtons++
       enrollmentButton.setAttribute(PREVIEW_ATTRIBUTE, 'enrollment-button')
     } else {
@@ -166,4 +160,16 @@ export async function previewSavedCourses(): Promise<CoursePreviewResult> {
   )
 
   return result
+}
+
+export function previewSavedCourses(): Promise<CoursePreviewResult> {
+  if (previewInFlight) return previewInFlight
+
+  const run = runCoursePreview()
+  previewInFlight = run
+  const clearInFlight = (): void => {
+    if (previewInFlight === run) previewInFlight = null
+  }
+  run.then(clearInFlight, clearInFlight)
+  return run
 }

@@ -4,6 +4,8 @@ import type { ModuleApi } from '../../src/types/modules'
 import { clearCoursePreview, previewSavedCourses } from '../../src/modules/course-store/preview'
 import { setApi } from '../../src/modules/course-store/state'
 
+type CourseSelections = Record<string, string[]>
+
 function createMockApi(): ModuleApi {
   return {
     bus: {
@@ -53,6 +55,11 @@ function createMockApi(): ModuleApi {
       dispose: vi.fn(),
     },
   }
+}
+
+function setStoredCourses(api: ModuleApi, selections: CourseSelections): void {
+  api.storage.getForDomain = async <T>(key: string): Promise<T | undefined> =>
+    (key === 'courseSelections' ? selections : undefined) as T | undefined
 }
 
 describe('course safe preview', () => {
@@ -172,5 +179,136 @@ describe('course safe preview', () => {
 
     expect(document.querySelector('[data-npu-course-preview]')).toBeNull()
     expect(document.querySelectorAll('mat-expansion-panel')).toHaveLength(panelCount)
+  })
+
+  it('clears stale markers and reports an empty saved set without touching controls', async () => {
+    await previewSavedCourses()
+    setStoredCourses(api, {})
+    const clickSpy = vi.fn()
+    document.querySelectorAll('button').forEach((button) => {
+      button.addEventListener('click', clickSpy)
+    })
+
+    const result = await previewSavedCourses()
+
+    expect(result).toEqual({
+      savedSubjects: 0,
+      matchedSubjects: 0,
+      savedCourses: 0,
+      matchedCourses: 0,
+      selectedCourses: 0,
+      enrollmentButtons: 0,
+      availableEnrollmentButtons: 0,
+      missing: [],
+    })
+    expect(document.querySelector('[data-npu-course-preview]')).toBeNull()
+    expect(clickSpy).not.toHaveBeenCalled()
+    expect(api.statusPanel.addMessage).toHaveBeenLastCalledWith(
+      'info',
+      expect.stringContaining('No saved courses to preview'),
+    )
+  })
+
+  it('does not confuse a saved course code with a longer visible prefix match', async () => {
+    setStoredCourses(api, { ABC12DE345: ['NE1'] })
+    document.body.innerHTML = `
+      <mat-expansion-panel class="mat-expanded">
+        <mat-expansion-panel-header>Algorithms ABC12DE345</mat-expansion-panel-header>
+        <div class="course-list-item-container">
+          <mat-checkbox><label><span class="mdc-label">NE10</span></label></mat-checkbox>
+        </div>
+        <button>Enroll subject</button>
+      </mat-expansion-panel>
+    `
+
+    const result = await previewSavedCourses()
+
+    expect(result.matchedCourses).toBe(0)
+    expect(result.missing).toContain('ABC12DE345: NE1 not visible')
+    expect(document.querySelector('[data-npu-course-preview="course"]')).toBeNull()
+  })
+
+  it('marks an enrollment button inside a hidden ancestor as unavailable', async () => {
+    setStoredCourses(api, { ABC12DE345: ['NE1'] })
+    document.body.innerHTML = `
+      <mat-expansion-panel class="mat-expanded">
+        <mat-expansion-panel-header>Algorithms ABC12DE345</mat-expansion-panel-header>
+        <div class="course-list-item-container">
+          <mat-checkbox><label><span class="mdc-label">NE1</span></label></mat-checkbox>
+        </div>
+        <div aria-hidden="true"><button>Enroll subject</button></div>
+      </mat-expansion-panel>
+    `
+
+    const result = await previewSavedCourses()
+
+    expect(result.enrollmentButtons).toBe(1)
+    expect(result.availableEnrollmentButtons).toBe(0)
+    expect(
+      document.querySelector('[data-npu-course-preview="unavailable-enrollment-button"]'),
+    ).not.toBeNull()
+  })
+
+  it('reports a panel that fails to expand and never clicks its inner controls', async () => {
+    vi.useFakeTimers()
+    try {
+      setStoredCourses(api, { ABC12DE345: ['NE1'] })
+      document.body.innerHTML = `
+        <mat-expansion-panel>
+          <mat-expansion-panel-header>Algorithms ABC12DE345</mat-expansion-panel-header>
+          <button>Enroll subject</button>
+        </mat-expansion-panel>
+      `
+      const headerClickSpy = vi.fn()
+      const enrollmentClickSpy = vi.fn()
+      document
+        .querySelector('mat-expansion-panel-header')
+        ?.addEventListener('click', headerClickSpy)
+      document.querySelector('button')?.addEventListener('click', enrollmentClickSpy)
+
+      const preview = previewSavedCourses()
+      await vi.advanceTimersByTimeAsync(6_000)
+      const result = await preview
+
+      expect(headerClickSpy).toHaveBeenCalledOnce()
+      expect(enrollmentClickSpy).not.toHaveBeenCalled()
+      expect(result.missing).toContain('ABC12DE345: subject panel could not be expanded')
+      expect(result.enrollmentButtons).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('coalesces overlapping preview requests so a lazy panel is expanded only once', async () => {
+    setStoredCourses(api, { ABC12DE345: ['NE1'] })
+    document.body.innerHTML = `
+      <mat-expansion-panel>
+        <mat-expansion-panel-header>Algorithms ABC12DE345</mat-expansion-panel-header>
+      </mat-expansion-panel>
+    `
+    const panel = document.querySelector('mat-expansion-panel')
+    const header = document.querySelector('mat-expansion-panel-header')
+    const headerClickSpy = vi.fn()
+    header?.addEventListener('click', () => {
+      headerClickSpy()
+      panel?.classList.add('mat-expanded')
+      panel?.insertAdjacentHTML(
+        'beforeend',
+        `
+          <div class="course-list-item-container">
+            <mat-checkbox><label><span class="mdc-label">NE1</span></label></mat-checkbox>
+          </div>
+          <button>Enroll subject</button>
+        `,
+      )
+    })
+
+    const first = previewSavedCourses()
+    const second = previewSavedCourses()
+
+    expect(second).toBe(first)
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(secondResult).toBe(firstResult)
+    expect(headerClickSpy).toHaveBeenCalledOnce()
   })
 })

@@ -5,11 +5,13 @@ import {
   getSubjectCode,
   parseExamRow,
 } from './dom'
+import { isElementAvailable } from '../../utils/element-availability'
 import { getApi } from './state'
 import { loadPreferences } from './storage'
 
 const PREVIEW_STYLE_ID = 'npu-exam-preview-style'
 const PREVIEW_ATTRIBUTE = 'data-npu-exam-preview'
+let previewInFlight: Promise<ExamPreviewResult> | null = null
 
 export interface ExamPreviewResult {
   savedExams: number
@@ -47,21 +49,13 @@ function ensurePreviewStyle(): void {
   document.head.appendChild(style)
 }
 
-function isButtonAvailable(button: HTMLButtonElement): boolean {
-  if (!button.isConnected || button.disabled || button.hasAttribute('disabled')) return false
-  if (button.getAttribute('aria-disabled') === 'true') return false
-
-  const style = window.getComputedStyle(button)
-  return style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none'
-}
-
 export function clearExamPreview(): void {
   document.querySelectorAll(`[${PREVIEW_ATTRIBUTE}]`).forEach((element) => {
     element.removeAttribute(PREVIEW_ATTRIBUTE)
   })
 }
 
-export async function previewSavedExams(): Promise<ExamPreviewResult> {
+async function runExamPreview(): Promise<ExamPreviewResult> {
   const api = getApi()
   const preferences = await loadPreferences()
   const entries = Object.entries(preferences)
@@ -106,7 +100,7 @@ export async function previewSavedExams(): Promise<ExamPreviewResult> {
       result.enrollmentButtons++
     }
 
-    if (info.felvetelBtn && isButtonAvailable(info.felvetelBtn)) {
+    if (info.felvetelBtn && isElementAvailable(info.felvetelBtn)) {
       result.availableEnrollmentButtons++
       availableSubjects.add(subjectCode)
       row.setAttribute(PREVIEW_ATTRIBUTE, 'row')
@@ -135,4 +129,16 @@ export async function previewSavedExams(): Promise<ExamPreviewResult> {
   )
 
   return result
+}
+
+export function previewSavedExams(): Promise<ExamPreviewResult> {
+  if (previewInFlight) return previewInFlight
+
+  const run = runExamPreview()
+  previewInFlight = run
+  const clearInFlight = (): void => {
+    if (previewInFlight === run) previewInFlight = null
+  }
+  run.then(clearInFlight, clearInFlight)
+  return run
 }
