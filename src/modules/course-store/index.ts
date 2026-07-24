@@ -54,6 +54,8 @@ async function runLocalSavedRushFallback(api: ModuleApi): Promise<void> {
   await loadAndEnroll()
 }
 
+let savedChoicesUnsub: (() => void) | null = null
+
 export const courseStoreModule: NpuModule = {
   id: 'course-store',
   name: 'Course Store',
@@ -68,6 +70,10 @@ export const courseStoreModule: NpuModule = {
     const api = moduleApi
 
     await renderModuleUI()
+    savedChoicesUnsub?.()
+    savedChoicesUnsub = api.bus.on('saved-choices:restored', () => {
+      renderModuleUI().catch((err) => api.logger.error('failed to refresh restored choices:', err))
+    })
 
     const selections = await loadSelections()
     const count = Object.keys(selections).length
@@ -166,6 +172,8 @@ export const courseStoreModule: NpuModule = {
   dispose(): void {
     setIsEnrolling(false)
     clearCoursePreview()
+    savedChoicesUnsub?.()
+    savedChoicesUnsub = null
     getRouteUnsub()?.()
     setRouteUnsub(null)
     setApi(null)

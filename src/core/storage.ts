@@ -9,6 +9,7 @@ export interface StorageService {
   remove(key: string): Promise<void>
   getForDomain<T>(key: string): Promise<T | undefined>
   setForDomain<T>(key: string, value: T): Promise<void>
+  setForDomainValues?(values: Record<string, unknown>): Promise<void>
 }
 
 let writeQueue: Promise<void> = Promise.resolve()
@@ -30,6 +31,7 @@ export function createStorageService(gm: GmStorage, domain: string): StorageServ
       await gm.setValue('npu3', JSON.stringify(data))
     } catch (err) {
       console.error('[NPU:storage] failed to save data:', err)
+      throw err
     }
   }
 
@@ -72,6 +74,14 @@ export function createStorageService(gm: GmStorage, domain: string): StorageServ
       await updateAll((data) => {
         const domainData = (data[`domain:${domain}`] ?? {}) as Record<string, unknown>
         domainData[key] = value
+        data[`domain:${domain}`] = domainData
+      })
+    },
+
+    async setForDomainValues(values: Record<string, unknown>): Promise<void> {
+      await updateAll((data) => {
+        const domainData = (data[`domain:${domain}`] ?? {}) as Record<string, unknown>
+        Object.assign(domainData, values)
         data[`domain:${domain}`] = domainData
       })
     },

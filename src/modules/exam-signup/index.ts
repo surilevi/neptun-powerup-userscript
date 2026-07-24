@@ -18,6 +18,7 @@ import { delay } from '../../utils/async'
 
 const EXAM_TABLE_WAIT_MS = 30_000
 const EXAM_RUSH_SETTLE_MS = 2_000
+let savedChoicesUnsub: (() => void) | null = null
 
 export const examSignupModule: NpuModule = {
   id: 'exam-signup',
@@ -45,6 +46,10 @@ export const examSignupModule: NpuModule = {
     }
 
     await renderModuleUI()
+    savedChoicesUnsub?.()
+    savedChoicesUnsub = api.bus.on('saved-choices:restored', () => {
+      renderModuleUI().catch((err) => api.logger.error('failed to refresh restored choices:', err))
+    })
 
     const subjectCode = getSubjectCode()
     if (subjectCode) {
@@ -68,6 +73,8 @@ export const examSignupModule: NpuModule = {
   dispose(): void {
     setIsDisposed(true)
     setIsEnrollmentInProgress(false)
+    savedChoicesUnsub?.()
+    savedChoicesUnsub = null
     const timer = getDebounceTimer()
     if (timer) {
       clearTimeout(timer)
