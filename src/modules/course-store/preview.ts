@@ -1,5 +1,6 @@
 import {
   extractCourseCode,
+  expandPanel,
   findSubjectPanel,
   getCourseItems,
   isCourseSelected,
@@ -95,7 +96,10 @@ export async function previewSavedCourses(): Promise<CoursePreviewResult> {
   }
 
   if (entries.length === 0) {
-    api?.statusPanel.addMessage('info', 'No saved courses to preview. No clicks were made.')
+    api?.statusPanel.addMessage(
+      'info',
+      'No saved courses to preview. No course selections or enrollment buttons were clicked.',
+    )
     return result
   }
 
@@ -109,7 +113,15 @@ export async function previewSavedCourses(): Promise<CoursePreviewResult> {
     result.matchedSubjects++
     panel.setAttribute(PREVIEW_ATTRIBUTE, 'subject')
 
-    const items = getCourseItems(panel)
+    const expanded = await expandPanel(panel)
+    if (!expanded) {
+      result.missing.push(`${subjectCode}: subject panel could not be expanded`)
+      continue
+    }
+
+    const livePanel = findSubjectPanel(subjectCode) ?? panel
+    livePanel.setAttribute(PREVIEW_ATTRIBUTE, 'subject')
+    const items = getCourseItems(livePanel)
     for (const courseCode of courseCodes) {
       const normalizedSavedCode = normalizeCode(courseCode)
       const item = items.find((candidate) => {
@@ -131,7 +143,7 @@ export async function previewSavedCourses(): Promise<CoursePreviewResult> {
       }
     }
 
-    const enrollmentButton = findEnrollmentButton(panel)
+    const enrollmentButton = findEnrollmentButton(livePanel)
     if (!enrollmentButton) {
       result.missing.push(`${subjectCode}: enrollment button not visible`)
       continue
@@ -150,7 +162,7 @@ export async function previewSavedCourses(): Promise<CoursePreviewResult> {
   api?.logger.info('course preview result', result)
   api?.statusPanel.addMessage(
     result.missing.length === 0 ? 'info' : 'warn',
-    `Preview: ${result.matchedCourses}/${result.savedCourses} saved courses matched; ${result.availableEnrollmentButtons}/${result.enrollmentButtons} enrollment buttons available. No clicks were made.`,
+    `Preview: ${result.matchedCourses}/${result.savedCourses} saved courses matched; ${result.availableEnrollmentButtons}/${result.enrollmentButtons} enrollment buttons available. No course selections or enrollment buttons were clicked.`,
   )
 
   return result

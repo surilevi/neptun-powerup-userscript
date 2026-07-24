@@ -121,7 +121,8 @@ export async function renderModuleUI(): Promise<void> {
     const previewBtn = document.createElement('button')
     previewBtn.style.cssText = `${btnStyle} background: #37474f; color: white;`
     previewBtn.textContent = 'Preview Saved'
-    previewBtn.title = 'Highlight saved course matches and enrollment buttons without clicking'
+    previewBtn.title =
+      'Expand saved subjects and highlight matches without clicking course or enrollment controls'
     previewBtn.addEventListener('click', () => {
       previewSavedCourses().catch((err) => api?.logger.error('course preview failed:', err))
     })
@@ -173,7 +174,7 @@ export async function renderModuleUI(): Promise<void> {
   const hint = document.createElement('div')
   hint.style.cssText = 'margin-top: 6px; font-size: 10px; color: #6a7a8a;'
   hint.textContent =
-    'Expand subjects and select courses before saving. Preview never clicks enrollment buttons.'
+    'Preview may expand saved subjects, but never clicks course selections or enrollment buttons.'
   container.appendChild(hint)
 
   if (debugEnabled) {

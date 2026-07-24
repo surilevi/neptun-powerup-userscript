@@ -120,8 +120,48 @@ describe('course safe preview', () => {
     expect(clickSpy).not.toHaveBeenCalled()
     expect(api.statusPanel.addMessage).toHaveBeenCalledWith(
       'warn',
-      expect.stringContaining('No clicks were made.'),
+      expect.stringContaining('No course selections or enrollment buttons were clicked.'),
     )
+  })
+
+  it('expands a collapsed subject only to reveal its lazy-rendered preview targets', async () => {
+    document.body.innerHTML = `
+      <mat-expansion-panel>
+        <mat-expansion-panel-header>Algorithms ABC12DE345</mat-expansion-panel-header>
+      </mat-expansion-panel>
+    `
+    const panel = document.querySelector('mat-expansion-panel')
+    const header = document.querySelector('mat-expansion-panel-header')
+    const headerClickSpy = vi.fn()
+    const enrollmentClickSpy = vi.fn()
+
+    header?.addEventListener('click', () => {
+      headerClickSpy()
+      panel?.classList.add('mat-expanded')
+      panel?.insertAdjacentHTML(
+        'beforeend',
+        `
+          <div class="course-list-item-container">
+            <mat-checkbox><label><span class="mdc-label">NE1</span></label></mat-checkbox>
+          </div>
+          <button>Tárgy felvétele</button>
+        `,
+      )
+      panel?.querySelector('button')?.addEventListener('click', enrollmentClickSpy)
+    })
+
+    const result = await previewSavedCourses()
+
+    expect(headerClickSpy).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({
+      matchedSubjects: 1,
+      matchedCourses: 1,
+      enrollmentButtons: 1,
+      availableEnrollmentButtons: 1,
+    })
+    expect(document.querySelector('[data-npu-course-preview="course"]')).not.toBeNull()
+    expect(document.querySelector('[data-npu-course-preview="enrollment-button"]')).not.toBeNull()
+    expect(enrollmentClickSpy).not.toHaveBeenCalled()
   })
 
   it('clears preview markers without removing page elements', async () => {

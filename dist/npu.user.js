@@ -2724,7 +2724,7 @@ mat-expansion-panel {
 			missing: []
 		};
 		if (entries.length === 0) {
-			api?.statusPanel.addMessage("info", "No saved courses to preview. No clicks were made.");
+			api?.statusPanel.addMessage("info", "No saved courses to preview. No course selections or enrollment buttons were clicked.");
 			return result;
 		}
 		for (const [subjectCode, courseCodes] of entries) {
@@ -2735,7 +2735,13 @@ mat-expansion-panel {
 			}
 			result.matchedSubjects++;
 			panel.setAttribute(PREVIEW_ATTRIBUTE$1, "subject");
-			const items = getCourseItems(panel);
+			if (!await expandPanel(panel)) {
+				result.missing.push(`${subjectCode}: subject panel could not be expanded`);
+				continue;
+			}
+			const livePanel = findSubjectPanel(subjectCode) ?? panel;
+			livePanel.setAttribute(PREVIEW_ATTRIBUTE$1, "subject");
+			const items = getCourseItems(livePanel);
 			for (const courseCode of courseCodes) {
 				const normalizedSavedCode = normalizeCode(courseCode);
 				const item = items.find((candidate) => {
@@ -2752,7 +2758,7 @@ mat-expansion-panel {
 					item.setAttribute(PREVIEW_ATTRIBUTE$1, "selected-course");
 				} else item.setAttribute(PREVIEW_ATTRIBUTE$1, "course");
 			}
-			const enrollmentButton = findEnrollmentButton(panel);
+			const enrollmentButton = findEnrollmentButton(livePanel);
 			if (!enrollmentButton) {
 				result.missing.push(`${subjectCode}: enrollment button not visible`);
 				continue;
@@ -2767,7 +2773,7 @@ mat-expansion-panel {
 			}
 		}
 		api?.logger.info("course preview result", result);
-		api?.statusPanel.addMessage(result.missing.length === 0 ? "info" : "warn", `Preview: ${result.matchedCourses}/${result.savedCourses} saved courses matched; ${result.availableEnrollmentButtons}/${result.enrollmentButtons} enrollment buttons available. No clicks were made.`);
+		api?.statusPanel.addMessage(result.missing.length === 0 ? "info" : "warn", `Preview: ${result.matchedCourses}/${result.savedCourses} saved courses matched; ${result.availableEnrollmentButtons}/${result.enrollmentButtons} enrollment buttons available. No course selections or enrollment buttons were clicked.`);
 		return result;
 	}
 	var COURSE_UI_BUILD = "3.3.0 safe-preview";
@@ -2849,7 +2855,7 @@ mat-expansion-panel {
 			const previewBtn = document.createElement("button");
 			previewBtn.style.cssText = `${btnStyle} background: #37474f; color: white;`;
 			previewBtn.textContent = "Preview Saved";
-			previewBtn.title = "Highlight saved course matches and enrollment buttons without clicking";
+			previewBtn.title = "Expand saved subjects and highlight matches without clicking course or enrollment controls";
 			previewBtn.addEventListener("click", () => {
 				previewSavedCourses().catch((err) => api?.logger.error("course preview failed:", err));
 			});
@@ -2891,7 +2897,7 @@ mat-expansion-panel {
 		container.appendChild(btnContainer);
 		const hint = document.createElement("div");
 		hint.style.cssText = "margin-top: 6px; font-size: 10px; color: #6a7a8a;";
-		hint.textContent = "Expand subjects and select courses before saving. Preview never clicks enrollment buttons.";
+		hint.textContent = "Preview may expand saved subjects, but never clicks course selections or enrollment buttons.";
 		container.appendChild(hint);
 		if (debugEnabled) {
 			const diagnosticsDiv = document.createElement("div");
