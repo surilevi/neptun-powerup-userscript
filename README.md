@@ -14,13 +14,29 @@ A script nem helyetted dönt, és nem kerül meg Neptun-szabályokat. A már kiv
 
 ## Mire jó?
 
-- `Course Store`: elmenti a kijelölt kurzusokat, később pedig visszatölti őket.
-- `Safe Preview`: a mentett kurzus- és vizsgatalálatokat, valamint a kapcsolódó felvételi gombokat kattintás nélkül kiemeli.
-- `Course Rush`: a mentett tárgyválasztást visszatölti, majd sorban megpróbálja felvenni a tárgyakat.
+- `Course Store`: elsődlegesen a Neptun `Órarendtervező` részében már kiválasztott pontos kurzusokkal dolgozik. A helyi mentés és visszatöltés továbbra is megmarad tartalékként.
+- `Safe Preview`: az órarendtervezőben vagy helyben mentett kurzustalálatokat és a kapcsolódó felvételi gombokat kiemeli anélkül, hogy kurzust választana vagy tárgyat venne fel.
+- `Course Rush`: az órarendtervező pontos kurzusválasztásait olvassa ki, majd a látható `Tárgy felvétele` gombokat egymás után kattintja. Üres tervezőnél a helyben mentett választás lehet a tartalék.
 - `Exam Planner`: naptárban mutatja a látható felvett és mentett vizsgaidőpontokat, és továbbra is el tud menteni egy választott időpontot későbbi jelentkezéshez.
 - `Exam Rush`: az aktuálisan látható vizsgaoldalon végigpróbálja a mentett vizsgacélokat.
 - `Infinite Session`: normál használat közben megpróbálja frissen tartani a munkamenetet. Tárgyfelvételi vagy vizsgajelentkezési roham alatt a Neptun ettől függetlenül is kidobhat.
 - `Theme`: választható színkiemelés a Neptun felületén.
+
+## Course Rush előkészítése
+
+1. A `Tárgyfelvétel` oldalon add hozzá az összes kívánt pontos kurzust a Neptun `Órarendtervező` részéhez.
+2. Az NPU panelen nyomd meg a `Preview Planner` gombot. A Safe Preview megnyithatja az órarendtervezőt, `Lista nézet`-re válthat és lenyithatja a tárgyfejléceket, de nem módosít kurzusjelölőt, tervezőállapotot vagy felvételt.
+3. Ellenőrizd a kiemelt tárgykódokat, kurzuskódokat és `Tárgy felvétele` gombokat.
+4. Kapcsold ki a Neptun saját tárgyfelvételi megerősítő felugró ablakát. Ezt egy olyan tárgynál tedd meg, amelyet egyébként is felvennél: a Neptun megerősítésében válaszd a „ne jelenjen meg újra” lehetőséget, majd a saját döntésed szerint fejezd be vagy szakítsd meg azt a kézi műveletet.
+5. Az azonnali futtatáshoz használd az `Enroll Planner` gombot, belépés utáni futtatáshoz pedig kapcsold be a `Course Rush` kapcsolót.
+
+Az `Enroll Planner` külön NPU-megerősítés nélkül, azonnal indul; a gomb megnyomása a látható, órarendtervezőben előkészített célok felvételének jóváhagyását jelenti. A `Course Rush` belépés után ugyanígy indul, majd azonnal kikapcsolja önmagát. Mindkét út újra ellenőrzi az egyes pontos kurzusválasztásokat, és ugyanazokat a Neptun felületi `Tárgy felvétele` gombokat használja egymás után; az NPU nem küld közvetlen, rejtett felvételi API-kérést. Egy tárgy hibája után a következő még érvényes tervezőcélokkal folytatja.
+
+Ha a Neptun saját megerősítő ablaka mégis megjelenik, az NPU az első érintett tárgynál megáll, és a többi felvételi gombot nem kattintja meg. A helyi `Save Local`, `Preview Saved` és `Local Load + Enroll` műveletek azoknak maradnak meg tartalékként, akik nem az órarendtervezős folyamatot használják.
+
+Lassú Neptun-betöltésnél a `Course Rush` legfeljebb 60 másodpercig vár az órarendtervező vezérlőire, majd a tárgy- és kurzussorok betöltésére. Ha ezek nem készülnek el, megáll, és nem indítja el automatikusan a helyi tartalékot. Így egy átmeneti betöltési vagy DOM-felismerési hiba nem válhat másik felvételi folyamat engedélyévé.
+
+Az órarendtervezős folyamat minden futása alapértelmezetten részletes, másolható állapotnaplót ír a böngésző konzoljára `[NPU:planner]` előtaggal és egyedi futásazonosítóval. A napló fázisokat, eltelt időket, elemszámokat és eredményállapotokat tartalmaz; hozzáférési tokent, fiókadatot, tárgykódot és kurzuskódot nem. Hibajelentéshez a konzolban szűrj az előtagra, és másold ki az érintett futás sorait.
 
 ## Telepítés
 
@@ -46,6 +62,7 @@ Emiatt több intézményi Neptun-telepítésen is működhet külön build nélk
 
 - A script a jelenlegi Neptun Angular/Material DOM-szerkezetére támaszkodik. Egy Neptun UI-frissítés eltörhet szelektorokat.
 - A tárgy- és vizsgafelismerés heurisztikus. Szokatlan helyi jelöléseknél szükség lehet finomhangolásra.
+- Az órarendtervezős folyamat nem függ a normál tárgylista első, jellemzően 50 elemétől: a tervező saját listájából olvassa ki a már hozzáadott tárgyakat. A kívánt kurzusokat azonban előzetesen neked kell a tervezőbe tenni.
 - A felvételi műveletek szándékosan egymás után futnak. A Neptun gyakran rosszul kezeli a párhuzamos kéréseket.
 - A vizsgafunkciók az éppen megnyitott vizsgaoldalon dolgoznak. Nem járják be önállóan az összes tárgyat és vizsgaoldalt.
 - Az `Infinite Session` nem jelent biztos védelmet regisztrációs időszakban. Ha a Neptun szerveroldalon érvényteleníti a munkamenetet, azt egy userscript nem tudja megakadályozni.
@@ -66,7 +83,7 @@ pnpm test
 pnpm typecheck
 ```
 
-Részletes debug naplózáshoz állítsd be ezt a böngésző konzoljában:
+Az általános modulok részletes debug naplózásához állítsd be ezt a böngésző konzoljában. Az órarendtervező `[NPU:planner]` diagnosztikája ettől függetlenül mindig aktív.
 
 ```js
 localStorage.npu_debug = 'true'

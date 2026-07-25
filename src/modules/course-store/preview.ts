@@ -9,10 +9,13 @@ import {
 import { isElementAvailable } from '../../utils/element-availability'
 import { getApi } from './state'
 import { loadSelections } from './storage'
+import { collectPlannerSnapshot } from './planner'
+import { createPlannerDiagnostics } from './planner-diagnostics'
 
 const PREVIEW_STYLE_ID = 'npu-course-preview-style'
 const PREVIEW_ATTRIBUTE = 'data-npu-course-preview'
 let previewInFlight: Promise<CoursePreviewResult> | null = null
+let plannerPreviewInFlight: Promise<PlannerPreviewResult> | null = null
 
 export interface CoursePreviewResult {
   savedSubjects: number
@@ -23,6 +26,18 @@ export interface CoursePreviewResult {
   enrollmentButtons: number
   availableEnrollmentButtons: number
   missing: string[]
+}
+
+export interface PlannerPreviewResult {
+  diagnosticRunId: string
+  contentReady: boolean
+  plannedSubjects: number
+  plannedCourses: number
+  enrollableSubjects: number
+  unavailableSubjects: number
+  openedPlanner: boolean
+  switchedToList: boolean
+  issues: string[]
 }
 
 function normalizeCode(code: string): string {
@@ -37,6 +52,10 @@ function ensurePreviewStyle(): void {
   style.textContent = `
     [${PREVIEW_ATTRIBUTE}="subject"] {
       outline: 2px solid #4f8cff !important;
+      outline-offset: 2px !important;
+    }
+    [${PREVIEW_ATTRIBUTE}="unavailable-subject"] {
+      outline: 2px solid #d64545 !important;
       outline-offset: 2px !important;
     }
     [${PREVIEW_ATTRIBUTE}="course"] {
@@ -169,6 +188,83 @@ export function previewSavedCourses(): Promise<CoursePreviewResult> {
   previewInFlight = run
   const clearInFlight = (): void => {
     if (previewInFlight === run) previewInFlight = null
+  }
+  run.then(clearInFlight, clearInFlight)
+  return run
+}
+
+async function runPlannerPreview(): Promise<PlannerPreviewResult> {
+  const api = getApi()
+
+  clearCoursePreview()
+  ensurePreviewStyle()
+
+  const diagnostics = createPlannerDiagnostics('preview')
+  diagnostics.log('preview:start')
+  const snapshot = await collectPlannerSnapshot({
+    diagnostics,
+    operation: 'preview',
+  })
+  const result: PlannerPreviewResult = {
+    diagnosticRunId: snapshot.diagnosticRunId,
+    contentReady: snapshot.contentReady,
+    plannedSubjects: snapshot.subjects.length,
+    plannedCourses: snapshot.subjects.reduce((sum, subject) => sum + subject.courseCodes.length, 0),
+    enrollableSubjects: snapshot.subjects.filter((subject) => subject.available).length,
+    unavailableSubjects: snapshot.subjects.filter((subject) => !subject.available).length,
+    openedPlanner: snapshot.preparation.openedPlanner,
+    switchedToList: snapshot.preparation.switchedToList,
+    issues: snapshot.issues,
+  }
+
+  for (const subject of snapshot.subjects) {
+    subject.panel.setAttribute(
+      PREVIEW_ATTRIBUTE,
+      subject.available ? 'subject' : 'unavailable-subject',
+    )
+    subject.selectedCourseItems.forEach((item) => {
+      item.setAttribute(PREVIEW_ATTRIBUTE, 'selected-course')
+    })
+
+    if (subject.enrollmentButton) {
+      subject.enrollmentButton.setAttribute(
+        PREVIEW_ATTRIBUTE,
+        subject.available ? 'enrollment-button' : 'unavailable-enrollment-button',
+      )
+    }
+  }
+
+  api?.logger.info('planner preview result', result)
+  diagnostics.log('preview:complete', {
+    contentReady: result.contentReady,
+    plannedSubjects: result.plannedSubjects,
+    plannedCourses: result.plannedCourses,
+    enrollableSubjects: result.enrollableSubjects,
+    issueCount: result.issues.length,
+  })
+  if (!result.contentReady) {
+    api?.statusPanel.addMessage(
+      'warn',
+      `Planner preview could not read a fully loaded subject list: ${result.issues.join('; ')}. No course, planner-selection, or enrollment controls were clicked. Console run: ${result.diagnosticRunId}.`,
+    )
+    return result
+  }
+
+  api?.statusPanel.addMessage(
+    result.issues.length === 0 ? 'info' : 'warn',
+    `Planner preview: ${result.enrollableSubjects}/${result.plannedSubjects} subjects ready; ${result.plannedCourses} planned courses found. Only planner view controls and subject headers may have been opened. No course, planner-selection, or enrollment controls were clicked. Console run: ${result.diagnosticRunId}.`,
+  )
+
+  return result
+}
+
+export function previewPlannedCourses(): Promise<PlannerPreviewResult> {
+  if (plannerPreviewInFlight) return plannerPreviewInFlight
+
+  const run = runPlannerPreview()
+  plannerPreviewInFlight = run
+  const clearInFlight = (): void => {
+    if (plannerPreviewInFlight === run) plannerPreviewInFlight = null
   }
   run.then(clearInFlight, clearInFlight)
   return run

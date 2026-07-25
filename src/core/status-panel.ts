@@ -393,7 +393,7 @@ export function createStatusPanel(
     const courseLabel = document.createElement('label')
     courseLabel.className = 'npu-rush-toggle'
     courseLabel.title =
-      'After login, open course registration and enroll saved courses. Session keep-alive is not guaranteed during registration rushes.'
+      'After login, enroll exact courses already added to Neptun timetable planner. Locally saved courses are the fallback when the planner is empty. Disable Neptun’s registration confirmation popup first.'
     courseRushToggle = document.createElement('input')
     courseRushToggle.type = 'checkbox'
     courseRushToggle.checked = courseRushOn

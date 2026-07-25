@@ -3,10 +3,11 @@ import { loadSelections, clearSelections, removeSingleSubject } from './storage'
 import { saveCurrentSelections } from './save'
 import { loadStoredSelections } from './load'
 import { loadAndEnroll, quickEnrollAll } from './enroll'
-import { clearCoursePreview, previewSavedCourses } from './preview'
+import { enrollPlannedCourses } from './planner-enroll'
+import { clearCoursePreview, previewPlannedCourses, previewSavedCourses } from './preview'
 import { isDebugEnabled } from '../../utils/debug'
 
-const COURSE_UI_BUILD = '3.3.0 safe-preview'
+const COURSE_UI_BUILD = '3.4.0 planner-first'
 
 /**
  * Build and set the module content for the unified status panel.
@@ -52,10 +53,41 @@ export async function renderModuleUI(): Promise<void> {
   const btnContainer = document.createElement('div')
   btnContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 5px;'
 
-  // Save button (always present)
+  const plannerPreviewBtn = document.createElement('button')
+  plannerPreviewBtn.style.cssText = `${btnStyle} background: #37474f; color: white;`
+  plannerPreviewBtn.textContent = 'Preview Planner'
+  plannerPreviewBtn.title =
+    'Open Neptun timetable planner list view and highlight its exact planned courses without changing selections or enrolling'
+  plannerPreviewBtn.addEventListener('click', () => {
+    previewPlannedCourses().catch((err) => api?.logger.error('planner preview failed:', err))
+  })
+  btnContainer.appendChild(plannerPreviewBtn)
+
+  const plannerEnrollBtn = document.createElement('button')
+  plannerEnrollBtn.style.cssText = `${btnStyle} background: #d84315; color: white; font-weight: bold;`
+  plannerEnrollBtn.textContent = 'Enroll Planner'
+  plannerEnrollBtn.title =
+    'Immediately revalidate the exact timetable-planner courses, then click every valid visible enrollment button sequentially'
+  plannerEnrollBtn.addEventListener('click', () => {
+    if (getIsEnrolling()) return
+    enrollPlannedCourses().catch((err) => api?.logger.error('planner enrollment failed:', err))
+  })
+  btnContainer.appendChild(plannerEnrollBtn)
+
+  const clearPreviewBtn = document.createElement('button')
+  clearPreviewBtn.style.cssText = `${btnStyle} background: #455a64; color: white;`
+  clearPreviewBtn.textContent = 'Clear Preview'
+  clearPreviewBtn.addEventListener('click', () => {
+    clearCoursePreview()
+    api.statusPanel.addMessage('info', 'Course preview cleared.')
+  })
+  btnContainer.appendChild(clearPreviewBtn)
+
+  // Local saved-selection fallback.
   const saveBtn = document.createElement('button')
   saveBtn.style.cssText = `${btnStyle} background: #1565c0; color: white;`
-  saveBtn.textContent = 'Save'
+  saveBtn.textContent = 'Save Local'
+  saveBtn.title = 'Save selections from the currently loaded subject list as a local fallback'
   saveBtn.addEventListener('click', () => {
     saveCurrentSelections().catch((err) => api?.logger.error('save selections failed:', err))
   })
@@ -128,20 +160,12 @@ export async function renderModuleUI(): Promise<void> {
     })
     btnContainer.appendChild(previewBtn)
 
-    const clearPreviewBtn = document.createElement('button')
-    clearPreviewBtn.style.cssText = `${btnStyle} background: #455a64; color: white;`
-    clearPreviewBtn.textContent = 'Clear Preview'
-    clearPreviewBtn.addEventListener('click', () => {
-      clearCoursePreview()
-      api.statusPanel.addMessage('info', 'Course preview cleared.')
-    })
-    btnContainer.appendChild(clearPreviewBtn)
-
-    // Load & Enroll combo button — the registration rush button
+    // Local saved-selection fallback enrollment.
     const loadEnrollBtn = document.createElement('button')
-    loadEnrollBtn.style.cssText = `${btnStyle} background: #d84315; color: white; font-weight: bold;`
-    loadEnrollBtn.textContent = 'Load + Enroll'
-    loadEnrollBtn.title = 'Load saved courses, then enroll each subject'
+    loadEnrollBtn.style.cssText = `${btnStyle} background: #ad451e; color: white;`
+    loadEnrollBtn.textContent = 'Local Load + Enroll'
+    loadEnrollBtn.title =
+      'Fallback: load locally saved courses from the subject list, then enroll each subject'
     loadEnrollBtn.addEventListener('click', () => {
       if (getIsEnrolling()) return
       loadAndEnroll().catch((err) => api?.logger.error('load & enroll failed:', err))
@@ -174,7 +198,7 @@ export async function renderModuleUI(): Promise<void> {
   const hint = document.createElement('div')
   hint.style.cssText = 'margin-top: 6px; font-size: 10px; color: #6a7a8a;'
   hint.textContent =
-    'Preview may expand saved subjects, but never clicks course selections or enrollment buttons.'
+    'Primary workflow: put exact courses in Neptun’s timetable planner, then Preview Planner. Enroll Planner starts immediately, never changes planner/course selections, and continues through every still-valid subject. Disable Neptun’s own registration popup first. Privacy-safe diagnostics are always logged under [NPU:planner]. Local buttons are the fallback.'
   container.appendChild(hint)
 
   if (debugEnabled) {

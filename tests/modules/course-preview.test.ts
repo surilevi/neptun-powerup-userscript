@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModuleApi } from '../../src/types/modules'
-import { clearCoursePreview, previewSavedCourses } from '../../src/modules/course-store/preview'
+import {
+  clearCoursePreview,
+  previewPlannedCourses,
+  previewSavedCourses,
+} from '../../src/modules/course-store/preview'
 import { setApi } from '../../src/modules/course-store/state'
 
 type CourseSelections = Record<string, string[]>
@@ -310,5 +314,76 @@ describe('course safe preview', () => {
     const [firstResult, secondResult] = await Promise.all([first, second])
     expect(secondResult).toBe(firstResult)
     expect(headerClickSpy).toHaveBeenCalledOnce()
+  })
+
+  it('previews the Neptun planner queue without changing course or planner selections', async () => {
+    document.body.innerHTML = `
+      <button class="timetable-planner__toggle-button" aria-label="Close timetable planner">
+        Timetable planner
+      </button>
+      <neptun-timetable-planner>
+        <neptun-timetable-planner-list-view>
+          <neptun-subject-list-item>
+            <mat-expansion-panel class="mat-expanded">
+              <mat-expansion-panel-header>Algorithms ABC12DE345</mat-expansion-panel-header>
+              <div class="course-list-item-container course-list-item-container--selected">
+                <mat-checkbox>
+                  <label><input type="checkbox" checked><span class="mdc-label">NE1</span></label>
+                </mat-checkbox>
+                <button class="planner-state">Added to planner</button>
+              </div>
+              <button class="enroll">Enroll subject</button>
+            </mat-expansion-panel>
+          </neptun-subject-list-item>
+          <neptun-subject-list-item>
+            <mat-expansion-panel class="mat-expanded">
+              <mat-expansion-panel-header>Automation BMEVIAUAC00</mat-expansion-panel-header>
+              <div class="course-list-item-container course-list-item-container--selected">
+                <mat-checkbox>
+                  <label><input type="checkbox" checked><span class="mdc-label">A1</span></label>
+                </mat-checkbox>
+              </div>
+              <button>Drop subject</button>
+            </mat-expansion-panel>
+          </neptun-subject-list-item>
+        </neptun-timetable-planner-list-view>
+      </neptun-timetable-planner>
+    `
+    const courseSelectionClickSpy = vi.fn()
+    const plannerSelectionClickSpy = vi.fn()
+    const enrollmentClickSpy = vi.fn()
+    document.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+      checkbox.addEventListener('click', courseSelectionClickSpy)
+    })
+    document.querySelector('.planner-state')?.addEventListener('click', plannerSelectionClickSpy)
+    document.querySelector('.enroll')?.addEventListener('click', enrollmentClickSpy)
+
+    const result = await previewPlannedCourses()
+
+    expect(result).toMatchObject({
+      plannedSubjects: 2,
+      plannedCourses: 2,
+      enrollableSubjects: 1,
+      unavailableSubjects: 1,
+      openedPlanner: false,
+      switchedToList: false,
+    })
+    expect(result.issues).toContain(
+      'BMEVIAUAC00: already registered or enrollment action unavailable',
+    )
+    expect(document.querySelectorAll('[data-npu-course-preview="selected-course"]')).toHaveLength(2)
+    expect(document.querySelectorAll('[data-npu-course-preview="enrollment-button"]')).toHaveLength(
+      1,
+    )
+    expect(
+      document.querySelectorAll('[data-npu-course-preview="unavailable-subject"]'),
+    ).toHaveLength(1)
+    expect(courseSelectionClickSpy).not.toHaveBeenCalled()
+    expect(plannerSelectionClickSpy).not.toHaveBeenCalled()
+    expect(enrollmentClickSpy).not.toHaveBeenCalled()
+    expect(api.statusPanel.addMessage).toHaveBeenCalledWith(
+      'warn',
+      expect.stringContaining('No course, planner-selection, or enrollment controls were clicked.'),
+    )
   })
 })

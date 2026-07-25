@@ -1,6 +1,6 @@
 {
   "name": "neptun-powerup-userscript",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "Neptun PowerUp! userscript for course and exam workflows",
   "type": "module",
   "packageManager": "pnpm@10.32.1",

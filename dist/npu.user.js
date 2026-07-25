@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neptun PowerUp! Userscript
 // @namespace    https://github.com/surilevi/neptun-powerup-userscript
-// @version      3.3.0
+// @version      3.4.0
 // @author       surilevi
 // @description  Neptun PowerUp! userscript for course and exam workflows
 // @license      MIT
@@ -696,7 +696,7 @@ mat-expansion-panel {
 			rushSection.appendChild(styleEl);
 			const courseLabel = document.createElement("label");
 			courseLabel.className = "npu-rush-toggle";
-			courseLabel.title = "After login, open course registration and enroll saved courses. Session keep-alive is not guaranteed during registration rushes.";
+			courseLabel.title = "After login, enroll exact courses already added to Neptun timetable planner. Locally saved courses are the fallback when the planner is empty. Disable Neptun’s registration confirmation popup first.";
 			courseRushToggle = document.createElement("input");
 			courseRushToggle.type = "checkbox";
 			courseRushToggle.checked = courseRushOn;
@@ -2672,9 +2672,648 @@ mat-expansion-panel {
 		}
 		return true;
 	}
+	var runSequence = 0;
+	function monotonicNow() {
+		try {
+			return performance.now();
+		} catch {
+			return Date.now();
+		}
+	}
+	function createPlannerDiagnostics(operation) {
+		const startedAt = monotonicNow();
+		const runId = `planner-${Date.now().toString(36)}-${++runSequence}`;
+		return {
+			runId,
+			log(event, details = {}) {
+				try {
+					console.info("[NPU:planner]", {
+						runId,
+						operation,
+						event,
+						elapsedMs: Math.round(monotonicNow() - startedAt),
+						...details
+					});
+				} catch {}
+			}
+		};
+	}
+	var PLANNER_TIMING = Object.freeze({
+		interactiveReadinessTimeoutMs: 3e4,
+		rushReadinessTimeoutMs: 6e4,
+		enrollmentRequestTimeoutMs: 3e4,
+		enrollmentUiUpdateTimeoutMs: 5e3,
+		listStabilityWindowMs: 500,
+		domPollIntervalMs: 50,
+		outcomePollIntervalMs: 100
+	});
+	var PLANNER_ROOT_SELECTOR = "neptun-timetable-planner";
+	var PLANNER_LIST_SELECTOR = "neptun-timetable-planner-list-view";
+	var PLANNER_TOGGLE_SELECTOR = "button.timetable-planner__toggle-button";
+	var PLANNER_VIEW_SELECT_ID = "timetable-planner-view-typeSelect";
+	function normalizeText$1(text) {
+		return text.normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
+	}
+	function isListViewText(text) {
+		const normalized = normalizeText$1(text);
+		return normalized.includes("lista nezet") || normalized.includes("list view");
+	}
+	function isPlannerExplicitlyEmpty(root) {
+		const text = normalizeText$1(root.textContent ?? "");
+		return [
+			"nincs megjelenitheto adat",
+			"nincs tervezőhoz adott targy",
+			"nincs tervezőhöz adott tárgy",
+			"no planned subjects",
+			"no data to display"
+		].some((message) => text.includes(normalizeText$1(message)));
+	}
+	async function waitForValue(read, timeoutMs = PLANNER_TIMING.interactiveReadinessTimeoutMs) {
+		const startedAt = Date.now();
+		let value = read();
+		while (value === null && Date.now() - startedAt < timeoutMs) {
+			await delay(PLANNER_TIMING.domPollIntervalMs);
+			value = read();
+		}
+		return value;
+	}
+	function getPlannerListRoot() {
+		return Array.from(document.querySelectorAll(PLANNER_LIST_SELECTOR)).find((root) => isElementAvailable(root)) ?? null;
+	}
+	function getPlannerRoot() {
+		return document.querySelector(PLANNER_ROOT_SELECTOR);
+	}
+	function isPlannerToggleText(text) {
+		const normalized = normalizeText$1(text);
+		return normalized.includes("orarendtervezo") || normalized.includes("timetable planner");
+	}
+	function findPlannerToggle() {
+		const availableExactMatch = Array.from(document.querySelectorAll(PLANNER_TOGGLE_SELECTOR)).find((button) => isElementAvailable(button));
+		if (availableExactMatch) return availableExactMatch;
+		return Array.from(document.querySelectorAll("button")).find((button) => isElementAvailable(button) && isPlannerToggleText(`${button.getAttribute("aria-label") ?? ""} ${button.textContent ?? ""}`)) ?? null;
+	}
+	function getPlannerToggleAction(button) {
+		const label = normalizeText$1(`${button.getAttribute("aria-label") ?? ""} ${button.textContent ?? ""}`);
+		if (label.includes("megnyit") || label.includes("open")) return "open";
+		if (label.includes("bezar") || label.includes("close")) return "close";
+		if (isPlannerToggleText(label)) return getPlannerListRoot() || findPlannerViewControl() ? "close" : "open";
+		return "unknown";
+	}
+	function findPlannerViewControl() {
+		const exact = document.getElementById(PLANNER_VIEW_SELECT_ID);
+		if (exact && isElementAvailable(exact)) return exact;
+		const planner = getPlannerRoot();
+		if (!planner) return null;
+		return Array.from(planner.querySelectorAll(`#${PLANNER_VIEW_SELECT_ID}, neptun-form-select-v2 mat-select, neptun-form-select-v2 [role="combobox"], neptun-form-select-v2`)).find((control) => isElementAvailable(control)) ?? null;
+	}
+	function getViewClickTarget(control) {
+		return control.querySelector("[role=\"combobox\"], mat-select, .mat-mdc-select-trigger") ?? control;
+	}
+	function findListViewOption() {
+		return Array.from(document.querySelectorAll("mat-option, [role=\"option\"]")).find((option) => isElementAvailable(option) && isListViewText(option.textContent ?? "")) ?? null;
+	}
+	function findSafePlannerEntryPoint() {
+		const list = getPlannerListRoot();
+		if (list) return {
+			type: "list",
+			element: list
+		};
+		const view = findPlannerViewControl();
+		if (view) return {
+			type: "view",
+			element: view
+		};
+		const toggle = findPlannerToggle();
+		if (toggle && getPlannerToggleAction(toggle) !== "unknown") return {
+			type: "toggle",
+			element: toggle
+		};
+		return null;
+	}
+	function finishPreparation(diagnostics, result) {
+		diagnostics.log(result.root ? "prepare:ready" : "prepare:failed", {
+			openedPlanner: result.openedPlanner,
+			switchedToList: result.switchedToList,
+			failure: result.error
+		});
+		return result;
+	}
+	async function preparePlannerListView(options = {}) {
+		const diagnostics = options.diagnostics ?? createPlannerDiagnostics(options.operation ?? "prepare");
+		const entryPointTimeoutMs = options.entryPointTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs;
+		diagnostics.log("prepare:start", {
+			readinessTimeoutMs: entryPointTimeoutMs,
+			pollIntervalMs: PLANNER_TIMING.domPollIntervalMs
+		});
+		const existingList = getPlannerListRoot();
+		if (existingList) return finishPreparation(diagnostics, {
+			root: existingList,
+			openedPlanner: false,
+			switchedToList: false,
+			error: null
+		});
+		let openedPlanner = false;
+		diagnostics.log("entry-point:waiting", { timeoutMs: entryPointTimeoutMs });
+		const entryPoint = await waitForValue(findSafePlannerEntryPoint, entryPointTimeoutMs);
+		if (!entryPoint) {
+			const unidentifiedToggle = findPlannerToggle();
+			return finishPreparation(diagnostics, {
+				root: null,
+				openedPlanner,
+				switchedToList: false,
+				error: unidentifiedToggle ? "Neptun timetable planner toggle appeared, but its action could not be identified safely" : `Neptun timetable planner controls did not appear within ${Math.ceil(entryPointTimeoutMs / 1e3)} seconds`
+			});
+		}
+		diagnostics.log("entry-point:ready", { type: entryPoint.type });
+		if (entryPoint.type === "list") return finishPreparation(diagnostics, {
+			root: entryPoint.element,
+			openedPlanner: false,
+			switchedToList: false,
+			error: null
+		});
+		let viewControl = entryPoint.type === "view" ? entryPoint.element : findPlannerViewControl();
+		if (!viewControl) {
+			const toggle = entryPoint.type === "toggle" && entryPoint.element.isConnected ? entryPoint.element : findPlannerToggle();
+			if (!toggle) return finishPreparation(diagnostics, {
+				root: null,
+				openedPlanner,
+				switchedToList: false,
+				error: "Neptun timetable planner toggle was not found"
+			});
+			const action = getPlannerToggleAction(toggle);
+			if (action !== "open") return finishPreparation(diagnostics, {
+				root: null,
+				openedPlanner,
+				switchedToList: false,
+				error: action === "close" ? "Neptun timetable planner is open but its view selector is not ready" : "Neptun timetable planner toggle action could not be identified safely"
+			});
+			diagnostics.log("planner-toggle:click", { action });
+			toggle.click();
+			openedPlanner = true;
+			diagnostics.log("planner-open:waiting", { timeoutMs: entryPointTimeoutMs });
+			const plannerReady = await waitForValue(() => {
+				const list = getPlannerListRoot();
+				if (list) return {
+					list,
+					viewControl: null
+				};
+				const control = findPlannerViewControl();
+				return control ? {
+					list: null,
+					viewControl: control
+				} : null;
+			}, entryPointTimeoutMs);
+			if (plannerReady?.list) return finishPreparation(diagnostics, {
+				root: plannerReady.list,
+				openedPlanner,
+				switchedToList: false,
+				error: null
+			});
+			viewControl = plannerReady?.viewControl ?? null;
+			if (!viewControl) return finishPreparation(diagnostics, {
+				root: null,
+				openedPlanner,
+				switchedToList: false,
+				error: "Neptun timetable planner did not finish opening"
+			});
+		}
+		if (isListViewText(viewControl.textContent ?? "")) {
+			diagnostics.log("list-view:waiting", { timeoutMs: entryPointTimeoutMs });
+			const listRoot = await waitForValue(getPlannerListRoot, entryPointTimeoutMs);
+			return finishPreparation(diagnostics, {
+				root: listRoot,
+				openedPlanner,
+				switchedToList: false,
+				error: listRoot ? null : "Neptun timetable planner list did not render"
+			});
+		}
+		diagnostics.log("view-selector:click");
+		getViewClickTarget(viewControl).click();
+		diagnostics.log("list-option:waiting", { timeoutMs: entryPointTimeoutMs });
+		const listOption = await waitForValue(findListViewOption, entryPointTimeoutMs);
+		if (!listOption) return finishPreparation(diagnostics, {
+			root: null,
+			openedPlanner,
+			switchedToList: false,
+			error: "Neptun timetable planner list-view option was not found"
+		});
+		diagnostics.log("list-option:click");
+		listOption.click();
+		diagnostics.log("list-view:waiting", { timeoutMs: entryPointTimeoutMs });
+		const listRoot = await waitForValue(getPlannerListRoot, entryPointTimeoutMs);
+		return finishPreparation(diagnostics, {
+			root: listRoot,
+			openedPlanner,
+			switchedToList: true,
+			error: listRoot ? null : "Neptun timetable planner list did not render"
+		});
+	}
+	function getPlannerSubjectPanels(root = getPlannerListRoot() ?? document) {
+		const scopedPanels = Array.from(root.querySelectorAll("neptun-subject-list-item mat-expansion-panel"));
+		if (scopedPanels.length > 0) return scopedPanels;
+		return Array.from(root.querySelectorAll("mat-expansion-panel"));
+	}
+	function findEnrollmentButton$1(panel) {
+		return Array.from(panel.querySelectorAll("button")).find((button) => isEnrollButtonText(button.textContent ?? "")) ?? null;
+	}
+	function readExpandedPlannerSubject(subjectCode, panel) {
+		const selectedCourseItems = getCourseItems(panel).filter((item) => isCourseSelected(item));
+		const courseCodes = Array.from(new Set(selectedCourseItems.map((item) => extractCourseCode(item)).filter((code) => code !== null)));
+		const enrollmentButton = findEnrollmentButton$1(panel);
+		let issue = null;
+		if (selectedCourseItems.length === 0) issue = `${subjectCode}: no planned course is selected`;
+		else if (courseCodes.length !== selectedCourseItems.length) issue = `${subjectCode}: one or more planned course codes could not be read`;
+		else if (!enrollmentButton) issue = `${subjectCode}: already registered or enrollment action unavailable`;
+		else if (!isElementAvailable(enrollmentButton)) issue = `${subjectCode}: enrollment action unavailable`;
+		return {
+			subjectCode,
+			panel,
+			selectedCourseItems,
+			courseCodes,
+			enrollmentButton,
+			available: issue === null,
+			issue
+		};
+	}
+	function readPlannerSubjectTarget(subjectCode, preferredPanel) {
+		const root = getPlannerListRoot();
+		if (!root) return null;
+		let panel = preferredPanel?.isConnected && root.contains(preferredPanel) ? preferredPanel : void 0;
+		if (!panel) {
+			const matches = getPlannerSubjectPanels(root).filter((candidate) => extractSubjectCode(candidate) === subjectCode);
+			if (matches.length !== 1) return null;
+			panel = matches[0];
+		}
+		return readExpandedPlannerSubject(subjectCode, panel);
+	}
+	function finishSnapshot(diagnostics, snapshot) {
+		diagnostics.log("snapshot:complete", {
+			contentReady: snapshot.contentReady,
+			listedSubjects: snapshot.listedSubjects,
+			readableSubjects: snapshot.subjects.length,
+			issueCount: snapshot.issues.length
+		});
+		return snapshot;
+	}
+	async function collectPlannerSnapshot(options = {}) {
+		const diagnostics = options.diagnostics ?? createPlannerDiagnostics(options.operation ?? "prepare");
+		const preparation = await preparePlannerListView({
+			...options,
+			diagnostics
+		});
+		if (!preparation.root) return finishSnapshot(diagnostics, {
+			diagnosticRunId: diagnostics.runId,
+			preparation,
+			contentReady: false,
+			listedSubjects: 0,
+			subjects: [],
+			issues: [preparation.error ?? "Neptun timetable planner list is unavailable"]
+		});
+		const issues = [];
+		const subjects = [];
+		const contentTimeoutMs = options.contentTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs;
+		diagnostics.log("subject-list:waiting", {
+			timeoutMs: contentTimeoutMs,
+			stabilityWindowMs: PLANNER_TIMING.listStabilityWindowMs
+		});
+		let lastSignature = "";
+		let stableSince = 0;
+		const startedWaitingAt = Date.now();
+		while (Date.now() - startedWaitingAt < contentTimeoutMs) {
+			const panels = getPlannerSubjectPanels(preparation.root);
+			const codes = panels.map((panel) => extractSubjectCode(panel));
+			const signature = panels.length > 0 && codes.every((code) => code !== null) ? codes.join("|") : "";
+			if (signature && signature === lastSignature) {
+				if (Date.now() - stableSince >= PLANNER_TIMING.listStabilityWindowMs) break;
+			} else {
+				lastSignature = signature;
+				stableSince = Date.now();
+			}
+			if (isPlannerExplicitlyEmpty(preparation.root)) break;
+			await delay(PLANNER_TIMING.domPollIntervalMs);
+		}
+		const plannerPanels = getPlannerSubjectPanels(preparation.root);
+		const subjectEntries = plannerPanels.map((panel) => ({
+			panel,
+			subjectCode: extractSubjectCode(panel)
+		})).filter((entry) => entry.subjectCode !== null);
+		if (subjectEntries.length === 0) {
+			const explicitlyEmpty = isPlannerExplicitlyEmpty(preparation.root);
+			return finishSnapshot(diagnostics, {
+				diagnosticRunId: diagnostics.runId,
+				preparation,
+				contentReady: explicitlyEmpty,
+				listedSubjects: plannerPanels.length,
+				subjects,
+				issues: [explicitlyEmpty ? "No planned subjects are visible in Neptun timetable planner list view" : plannerPanels.length === 0 ? "Neptun timetable planner subjects did not finish loading" : "Planner subjects are visible, but their subject codes could not be read safely"]
+			});
+		}
+		diagnostics.log("subject-list:ready", {
+			panelCount: plannerPanels.length,
+			readableCount: subjectEntries.length
+		});
+		const expandedEntries = [];
+		for (const { subjectCode, panel } of subjectEntries) {
+			if (!panel.isConnected) {
+				issues.push(`${subjectCode}: planner subject disappeared before expansion`);
+				continue;
+			}
+			if (!await expandPanel(panel)) {
+				issues.push(`${subjectCode}: planner subject could not be expanded`);
+				continue;
+			}
+			expandedEntries.push({
+				subjectCode,
+				panel
+			});
+		}
+		diagnostics.log("subject-panels:expanded", {
+			expandedCount: expandedEntries.length,
+			failedCount: subjectEntries.length - expandedEntries.length
+		});
+		const contentDeadline = Date.now() + contentTimeoutMs;
+		diagnostics.log("course-rows:waiting", { timeoutMs: contentTimeoutMs });
+		while (Date.now() < contentDeadline && expandedEntries.some(({ panel }) => getCourseItems(panel).length === 0)) await delay(PLANNER_TIMING.domPollIntervalMs);
+		for (const { subjectCode, panel } of expandedEntries) {
+			if (getCourseItems(panel).length === 0) {
+				issues.push(`${subjectCode}: planner course rows did not finish loading`);
+				continue;
+			}
+			const liveTarget = readPlannerSubjectTarget(subjectCode, panel);
+			if (!liveTarget) {
+				issues.push(`${subjectCode}: planner subject disappeared after expansion`);
+				continue;
+			}
+			subjects.push(liveTarget);
+			if (liveTarget.issue) issues.push(liveTarget.issue);
+		}
+		return finishSnapshot(diagnostics, {
+			diagnosticRunId: diagnostics.runId,
+			preparation,
+			contentReady: true,
+			listedSubjects: plannerPanels.length,
+			subjects,
+			issues
+		});
+	}
+	function closePlannerSafely() {
+		const toggle = findPlannerToggle();
+		if (!toggle || getPlannerToggleAction(toggle) !== "close") return false;
+		toggle.click();
+		return true;
+	}
+	var ENROLLMENT_ENDPOINT = "SubjectApplication/SubjectSignin";
+	var plannerEnrollmentInFlight = null;
+	function emptyResult(error) {
+		return {
+			plannerReady: false,
+			openedPlanner: false,
+			listedSubjects: 0,
+			plannedSubjects: 0,
+			eligibleSubjects: 0,
+			attempted: 0,
+			enrolled: 0,
+			failed: 0,
+			skipped: 0,
+			aborted: false,
+			errors: error ? [error] : []
+		};
+	}
+	function normalizeCodes(codes) {
+		return codes.map((code) => code.replace(/\s+/g, "").toUpperCase()).sort();
+	}
+	function courseSelectionMatches(expected, actual) {
+		const normalizedExpected = normalizeCodes(expected);
+		const normalizedActual = normalizeCodes(actual);
+		return normalizedExpected.length === normalizedActual.length && normalizedExpected.every((code, index) => code === normalizedActual[index]);
+	}
+	function isEnrollmentConfirmationDialog(dialog) {
+		const text = (dialog.textContent ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
+		if (text.includes("confirm subject registration") || text.includes("biztosan felveszi") || text.includes("targyfelvetel megerositese")) return true;
+		const buttonLabels = Array.from(dialog.querySelectorAll("button")).map((button) => (button.textContent ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim().toLowerCase());
+		const hasAccept = buttonLabels.some((label) => [
+			"igen",
+			"yes",
+			"ok"
+		].includes(label));
+		const hasReject = buttonLabels.some((label) => [
+			"nem",
+			"no",
+			"megse",
+			"cancel"
+		].includes(label));
+		return hasAccept && hasReject;
+	}
+	function getVisibleDialogs() {
+		return Array.from(document.querySelectorAll("[role=\"dialog\"], mat-dialog-container, .mat-mdc-dialog-container")).filter((dialog) => isElementAvailable(dialog) && isEnrollmentConfirmationDialog(dialog));
+	}
+	function getVisibleNotificationState() {
+		return Array.from(document.querySelectorAll(".cdk-overlay-pane, [role=\"status\"], [aria-live=\"polite\"], [aria-live=\"assertive\"]")).filter((element) => isElementAvailable(element) && !isEnrollmentConfirmationDialog(element)).map((element) => (element.textContent ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim().toLowerCase()).filter(Boolean).join("|");
+	}
+	function isFailureNotification(text) {
+		return [
+			"sikertelen",
+			"failed",
+			"hiba",
+			"error",
+			"nincs targyjelentkezesi idoszak"
+		].some((marker) => text.includes(marker));
+	}
+	function getEnrollmentRequests() {
+		try {
+			return performance.getEntriesByType("resource").filter((entry) => entry.name.includes(ENROLLMENT_ENDPOINT));
+		} catch {
+			return [];
+		}
+	}
+	async function waitForEnrollmentOutcome(requestsBeforeClick, dialogsBeforeClick, timeoutMs = PLANNER_TIMING.enrollmentRequestTimeoutMs) {
+		const startedWaitingAt = Date.now();
+		while (Date.now() - startedWaitingAt < timeoutMs) {
+			if (getVisibleDialogs().find((dialog) => !dialogsBeforeClick.has(dialog))) return { type: "confirmation-required" };
+			const requests = getEnrollmentRequests();
+			const request = requests.length > requestsBeforeClick ? requests[requests.length - 1] : null;
+			if (request) {
+				const responseStatus = request.responseStatus;
+				return {
+					type: "request",
+					status: typeof responseStatus === "number" ? responseStatus : null
+				};
+			}
+			await delay(PLANNER_TIMING.outcomePollIntervalMs);
+		}
+		return { type: "timeout" };
+	}
+	function hasVisibleEnrollmentAction(subjectCode) {
+		const root = getPlannerListRoot();
+		if (!root) return false;
+		return getPlannerSubjectPanels(root).filter((panel) => extractSubjectCode(panel) === subjectCode).some((panel) => Array.from(panel.querySelectorAll("button")).some((button) => isEnrollButtonText(button.textContent ?? "") && isElementAvailable(button)));
+	}
+	async function waitForPlannerUiOutcome(subjectCode, previousButton, notificationStateBeforeClick, timeoutMs = PLANNER_TIMING.enrollmentUiUpdateTimeoutMs) {
+		const startedAt = Date.now();
+		while (Date.now() - startedAt < timeoutMs) {
+			if (!previousButton.isConnected && !hasVisibleEnrollmentAction(subjectCode)) return "updated";
+			if (!hasVisibleEnrollmentAction(subjectCode)) return "updated";
+			const notificationState = getVisibleNotificationState();
+			if (notificationState !== notificationStateBeforeClick && isFailureNotification(notificationState)) return "failure-notification";
+			await delay(PLANNER_TIMING.outcomePollIntervalMs);
+		}
+		return "timeout";
+	}
+	function validateTarget(target) {
+		const liveTarget = readPlannerSubjectTarget(target.subjectCode, target.panel);
+		if (!liveTarget || !liveTarget.available || !liveTarget.enrollmentButton || !courseSelectionMatches(target.courseCodes, liveTarget.courseCodes)) return null;
+		return liveTarget;
+	}
+	async function runPlannerEnrollment(options) {
+		const api = getApi$1();
+		const diagnostics = createPlannerDiagnostics("enroll");
+		const readinessTimeoutMs = options.plannerWaitTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs;
+		diagnostics.log("enroll:start", {
+			readinessTimeoutMs,
+			requestTimeoutMs: PLANNER_TIMING.enrollmentRequestTimeoutMs,
+			uiUpdateTimeoutMs: PLANNER_TIMING.enrollmentUiUpdateTimeoutMs
+		});
+		const snapshot = await collectPlannerSnapshot({
+			entryPointTimeoutMs: readinessTimeoutMs,
+			contentTimeoutMs: readinessTimeoutMs,
+			diagnostics,
+			operation: "enroll"
+		});
+		const eligibleTargets = snapshot.subjects.filter((subject) => subject.available && subject.enrollmentButton);
+		const result = {
+			plannerReady: snapshot.preparation.root !== null && snapshot.contentReady,
+			openedPlanner: snapshot.preparation.openedPlanner,
+			listedSubjects: snapshot.listedSubjects,
+			plannedSubjects: snapshot.subjects.length,
+			eligibleSubjects: eligibleTargets.length,
+			attempted: 0,
+			enrolled: 0,
+			failed: 0,
+			skipped: snapshot.subjects.length - eligibleTargets.length,
+			aborted: false,
+			errors: [...snapshot.issues]
+		};
+		diagnostics.log("enroll:targets", {
+			listedSubjects: result.listedSubjects,
+			readableSubjects: result.plannedSubjects,
+			eligibleSubjects: result.eligibleSubjects,
+			skippedSubjects: result.skipped
+		});
+		if (!snapshot.preparation.root || !snapshot.contentReady) {
+			diagnostics.log("enroll:blocked", { reason: "planner-not-ready" });
+			api?.statusPanel.addMessage("warn", `${snapshot.preparation.error ?? (snapshot.issues.join("; ") || "Neptun timetable planner list is unavailable.")} Console run: ${diagnostics.runId}.`);
+			return result;
+		}
+		if (eligibleTargets.length === 0) {
+			diagnostics.log("enroll:blocked", { reason: "no-eligible-targets" });
+			api?.statusPanel.addMessage("warn", `No enrollable planned subjects were found. Preview the planner and review unavailable items. Console run: ${diagnostics.runId}.`);
+			return result;
+		}
+		try {
+			if (!sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken)) {
+				result.aborted = true;
+				result.errors.push("Session expired");
+				diagnostics.log("enroll:blocked", { reason: "session-expired" });
+				api?.statusPanel.addMessage("error", `Session expired. Log in again before enrolling. Console run: ${diagnostics.runId}.`);
+				return result;
+			}
+		} catch (error) {
+			api?.logger.warn("cannot check sessionStorage before planner enrollment:", error);
+		}
+		api?.statusPanel.expand();
+		api?.statusPanel.addMessage("info", `Enrolling ${eligibleTargets.length} planned subject${eligibleTargets.length === 1 ? "" : "s"} sequentially...`);
+		for (const [targetIndex, target] of eligibleTargets.entries()) {
+			const liveTarget = validateTarget(target);
+			if (!liveTarget?.enrollmentButton) {
+				result.failed++;
+				result.errors.push(`${target.subjectCode}: planner selection changed before enrollment`);
+				diagnostics.log("target:skipped", {
+					targetIndex,
+					reason: "selection-changed"
+				});
+				continue;
+			}
+			result.attempted++;
+			api?.statusPanel.addMessage("info", `Enrolling ${target.subjectCode}... (${result.attempted}/${eligibleTargets.length})`);
+			const dialogsBeforeClick = new Set(getVisibleDialogs());
+			const notificationStateBeforeClick = getVisibleNotificationState();
+			const requestsBeforeClick = getEnrollmentRequests().length;
+			const enrollmentButton = liveTarget.enrollmentButton;
+			diagnostics.log("target:click", {
+				targetIndex,
+				targetCount: eligibleTargets.length,
+				priorRequestCount: requestsBeforeClick
+			});
+			enrollmentButton.click();
+			const outcome = await waitForEnrollmentOutcome(requestsBeforeClick, dialogsBeforeClick);
+			diagnostics.log("target:request-outcome", {
+				targetIndex,
+				outcome: outcome.type,
+				status: outcome.type === "request" ? outcome.status : null
+			});
+			if (outcome.type === "confirmation-required") {
+				result.failed++;
+				result.aborted = true;
+				result.errors.push(`${target.subjectCode}: Neptun registration confirmation popup is enabled`);
+				api?.statusPanel.addMessage("error", `Neptun opened a registration confirmation. Complete or cancel it manually, enable “do not show again,” then retry. Remaining subjects were not clicked. Console run: ${diagnostics.runId}.`);
+				break;
+			}
+			if (outcome.type === "timeout") {
+				result.failed++;
+				result.errors.push(`${target.subjectCode}: timed out waiting for Neptun`);
+				continue;
+			}
+			if (outcome.status !== null && outcome.status >= 400) {
+				result.failed++;
+				result.errors.push(`${target.subjectCode}: server returned ${outcome.status}`);
+				continue;
+			}
+			const uiOutcome = await waitForPlannerUiOutcome(target.subjectCode, enrollmentButton, notificationStateBeforeClick);
+			diagnostics.log("target:ui-outcome", {
+				targetIndex,
+				outcome: uiOutcome
+			});
+			if (uiOutcome === "failure-notification") {
+				result.failed++;
+				result.errors.push(`${target.subjectCode}: Neptun reported enrollment failure`);
+				continue;
+			}
+			if (uiOutcome === "timeout") {
+				result.failed++;
+				result.errors.push(`${target.subjectCode}: request completed but planner did not confirm enrollment`);
+				continue;
+			}
+			result.enrolled++;
+		}
+		const summary = `Planner enrollment: ${result.enrolled} enrolled, ${result.failed} failed, ${result.skipped} skipped.${result.aborted ? " Stopped safely." : ""}`;
+		const summaryWithRunId = `${summary} Console run: ${diagnostics.runId}.`;
+		diagnostics.log("enroll:complete", {
+			enrolled: result.enrolled,
+			failed: result.failed,
+			skipped: result.skipped,
+			aborted: result.aborted
+		});
+		api?.logger.info(summary, result);
+		api?.statusPanel.addMessage(result.failed === 0 && !result.aborted ? "info" : "warn", result.errors.length > 0 ? `${summaryWithRunId} ${result.errors.join("; ")}` : summaryWithRunId);
+		return result;
+	}
+	function enrollPlannedCourses(options = {}) {
+		if (plannerEnrollmentInFlight) return plannerEnrollmentInFlight;
+		if (getIsEnrolling()) return Promise.resolve(emptyResult("Enrollment is already in progress"));
+		setIsEnrolling(true);
+		const run = runPlannerEnrollment(options);
+		plannerEnrollmentInFlight = run;
+		const clearInFlight = () => {
+			if (plannerEnrollmentInFlight === run) plannerEnrollmentInFlight = null;
+			setIsEnrolling(false);
+		};
+		run.then(clearInFlight, clearInFlight);
+		return run;
+	}
 	var PREVIEW_STYLE_ID$1 = "npu-course-preview-style";
 	var PREVIEW_ATTRIBUTE$1 = "data-npu-course-preview";
 	var previewInFlight$1 = null;
+	var plannerPreviewInFlight = null;
 	function normalizeCode(code) {
 		return code.replace(/\s+/g, "").toUpperCase();
 	}
@@ -2685,6 +3324,10 @@ mat-expansion-panel {
 		style.textContent = `
     [${PREVIEW_ATTRIBUTE$1}="subject"] {
       outline: 2px solid #4f8cff !important;
+      outline-offset: 2px !important;
+    }
+    [${PREVIEW_ATTRIBUTE$1}="unavailable-subject"] {
+      outline: 2px solid #d64545 !important;
       outline-offset: 2px !important;
     }
     [${PREVIEW_ATTRIBUTE$1}="course"] {
@@ -2793,7 +3436,60 @@ mat-expansion-panel {
 		run.then(clearInFlight, clearInFlight);
 		return run;
 	}
-	var COURSE_UI_BUILD = "3.3.0 safe-preview";
+	async function runPlannerPreview() {
+		const api = getApi$1();
+		clearCoursePreview();
+		ensurePreviewStyle$1();
+		const diagnostics = createPlannerDiagnostics("preview");
+		diagnostics.log("preview:start");
+		const snapshot = await collectPlannerSnapshot({
+			diagnostics,
+			operation: "preview"
+		});
+		const result = {
+			diagnosticRunId: snapshot.diagnosticRunId,
+			contentReady: snapshot.contentReady,
+			plannedSubjects: snapshot.subjects.length,
+			plannedCourses: snapshot.subjects.reduce((sum, subject) => sum + subject.courseCodes.length, 0),
+			enrollableSubjects: snapshot.subjects.filter((subject) => subject.available).length,
+			unavailableSubjects: snapshot.subjects.filter((subject) => !subject.available).length,
+			openedPlanner: snapshot.preparation.openedPlanner,
+			switchedToList: snapshot.preparation.switchedToList,
+			issues: snapshot.issues
+		};
+		for (const subject of snapshot.subjects) {
+			subject.panel.setAttribute(PREVIEW_ATTRIBUTE$1, subject.available ? "subject" : "unavailable-subject");
+			subject.selectedCourseItems.forEach((item) => {
+				item.setAttribute(PREVIEW_ATTRIBUTE$1, "selected-course");
+			});
+			if (subject.enrollmentButton) subject.enrollmentButton.setAttribute(PREVIEW_ATTRIBUTE$1, subject.available ? "enrollment-button" : "unavailable-enrollment-button");
+		}
+		api?.logger.info("planner preview result", result);
+		diagnostics.log("preview:complete", {
+			contentReady: result.contentReady,
+			plannedSubjects: result.plannedSubjects,
+			plannedCourses: result.plannedCourses,
+			enrollableSubjects: result.enrollableSubjects,
+			issueCount: result.issues.length
+		});
+		if (!result.contentReady) {
+			api?.statusPanel.addMessage("warn", `Planner preview could not read a fully loaded subject list: ${result.issues.join("; ")}. No course, planner-selection, or enrollment controls were clicked. Console run: ${result.diagnosticRunId}.`);
+			return result;
+		}
+		api?.statusPanel.addMessage(result.issues.length === 0 ? "info" : "warn", `Planner preview: ${result.enrollableSubjects}/${result.plannedSubjects} subjects ready; ${result.plannedCourses} planned courses found. Only planner view controls and subject headers may have been opened. No course, planner-selection, or enrollment controls were clicked. Console run: ${result.diagnosticRunId}.`);
+		return result;
+	}
+	function previewPlannedCourses() {
+		if (plannerPreviewInFlight) return plannerPreviewInFlight;
+		const run = runPlannerPreview();
+		plannerPreviewInFlight = run;
+		const clearInFlight = () => {
+			if (plannerPreviewInFlight === run) plannerPreviewInFlight = null;
+		};
+		run.then(clearInFlight, clearInFlight);
+		return run;
+	}
+	var COURSE_UI_BUILD = "3.4.0 planner-first";
 	async function renderModuleUI$1() {
 		const api = getApi$1();
 		if (!api) return;
@@ -2824,9 +3520,35 @@ mat-expansion-panel {
   `;
 		const btnContainer = document.createElement("div");
 		btnContainer.style.cssText = "display: flex; flex-wrap: wrap; gap: 5px;";
+		const plannerPreviewBtn = document.createElement("button");
+		plannerPreviewBtn.style.cssText = `${btnStyle} background: #37474f; color: white;`;
+		plannerPreviewBtn.textContent = "Preview Planner";
+		plannerPreviewBtn.title = "Open Neptun timetable planner list view and highlight its exact planned courses without changing selections or enrolling";
+		plannerPreviewBtn.addEventListener("click", () => {
+			previewPlannedCourses().catch((err) => api?.logger.error("planner preview failed:", err));
+		});
+		btnContainer.appendChild(plannerPreviewBtn);
+		const plannerEnrollBtn = document.createElement("button");
+		plannerEnrollBtn.style.cssText = `${btnStyle} background: #d84315; color: white; font-weight: bold;`;
+		plannerEnrollBtn.textContent = "Enroll Planner";
+		plannerEnrollBtn.title = "Immediately revalidate the exact timetable-planner courses, then click every valid visible enrollment button sequentially";
+		plannerEnrollBtn.addEventListener("click", () => {
+			if (getIsEnrolling()) return;
+			enrollPlannedCourses().catch((err) => api?.logger.error("planner enrollment failed:", err));
+		});
+		btnContainer.appendChild(plannerEnrollBtn);
+		const clearPreviewBtn = document.createElement("button");
+		clearPreviewBtn.style.cssText = `${btnStyle} background: #455a64; color: white;`;
+		clearPreviewBtn.textContent = "Clear Preview";
+		clearPreviewBtn.addEventListener("click", () => {
+			clearCoursePreview();
+			api.statusPanel.addMessage("info", "Course preview cleared.");
+		});
+		btnContainer.appendChild(clearPreviewBtn);
 		const saveBtn = document.createElement("button");
 		saveBtn.style.cssText = `${btnStyle} background: #1565c0; color: white;`;
-		saveBtn.textContent = "Save";
+		saveBtn.textContent = "Save Local";
+		saveBtn.title = "Save selections from the currently loaded subject list as a local fallback";
 		saveBtn.addEventListener("click", () => {
 			saveCurrentSelections().catch((err) => api?.logger.error("save selections failed:", err));
 		});
@@ -2877,18 +3599,10 @@ mat-expansion-panel {
 				previewSavedCourses().catch((err) => api?.logger.error("course preview failed:", err));
 			});
 			btnContainer.appendChild(previewBtn);
-			const clearPreviewBtn = document.createElement("button");
-			clearPreviewBtn.style.cssText = `${btnStyle} background: #455a64; color: white;`;
-			clearPreviewBtn.textContent = "Clear Preview";
-			clearPreviewBtn.addEventListener("click", () => {
-				clearCoursePreview();
-				api.statusPanel.addMessage("info", "Course preview cleared.");
-			});
-			btnContainer.appendChild(clearPreviewBtn);
 			const loadEnrollBtn = document.createElement("button");
-			loadEnrollBtn.style.cssText = `${btnStyle} background: #d84315; color: white; font-weight: bold;`;
-			loadEnrollBtn.textContent = "Load + Enroll";
-			loadEnrollBtn.title = "Load saved courses, then enroll each subject";
+			loadEnrollBtn.style.cssText = `${btnStyle} background: #ad451e; color: white;`;
+			loadEnrollBtn.textContent = "Local Load + Enroll";
+			loadEnrollBtn.title = "Fallback: load locally saved courses from the subject list, then enroll each subject";
 			loadEnrollBtn.addEventListener("click", () => {
 				if (getIsEnrolling()) return;
 				loadAndEnroll().catch((err) => api?.logger.error("load & enroll failed:", err));
@@ -2914,7 +3628,7 @@ mat-expansion-panel {
 		container.appendChild(btnContainer);
 		const hint = document.createElement("div");
 		hint.style.cssText = "margin-top: 6px; font-size: 10px; color: #6a7a8a;";
-		hint.textContent = "Preview may expand saved subjects, but never clicks course selections or enrollment buttons.";
+		hint.textContent = "Primary workflow: put exact courses in Neptun’s timetable planner, then Preview Planner. Enroll Planner starts immediately, never changes planner/course selections, and continues through every still-valid subject. Disable Neptun’s own registration popup first. Privacy-safe diagnostics are always logged under [NPU:planner]. Local buttons are the fallback.";
 		container.appendChild(hint);
 		if (debugEnabled) {
 			const diagnosticsDiv = document.createElement("div");
@@ -2935,6 +3649,33 @@ mat-expansion-panel {
 		api?.logger.info("cleared all stored course selections");
 		api?.statusPanel.addMessage("info", "All stored selections cleared.");
 		await renderModuleUI$1();
+	}
+	async function runLocalSavedRushFallback(api) {
+		api.statusPanel.addMessage("info", "Neptun timetable planner is empty. Trying locally saved courses as the fallback...");
+		const autoSearchResult = await autoSearchSubjects();
+		let panelCount = getSubjectPanels().length;
+		if (panelCount === 0) {
+			const listingResult = await waitForSubjectListing({
+				timeoutMs: PLANNER_TIMING.rushReadinessTimeoutMs,
+				searchStartedAtMs: autoSearchResult.searchStartedAtMs ?? performance.now(),
+				allowAutoClick: !autoSearchResult.clickedSearchButton
+			});
+			panelCount = listingResult.panels;
+			if (panelCount === 0) {
+				if (listingResult.state === "request-failed" && listingResult.requestStatus !== null) {
+					api.logger.warn(`Rush Mode: subject search failed with status ${listingResult.requestStatus}`);
+					api.statusPanel.addMessage("warn", `Subject search failed (${listingResult.requestStatus}). Registration may not be open yet.`);
+				} else if (listingResult.state === "request-completed-no-panels") {
+					api.logger.warn("Rush Mode: subject search completed but no subjects were listed");
+					api.statusPanel.addMessage("warn", "Subject search completed, but no subjects were listed. Check filters or registration availability.");
+				} else {
+					api.logger.warn("Rush Mode: timed out waiting for subject listing - cannot auto-enroll");
+					api.statusPanel.addMessage("warn", "Timed out waiting for subjects to load. Try refreshing and enabling Rush Mode again.");
+				}
+				return;
+			}
+		}
+		await loadAndEnroll();
 	}
 	var courseStoreModule = {
 		id: "course-store",
@@ -2971,44 +3712,22 @@ mat-expansion-panel {
 					});
 				}
 			}));
-			const autoSearchResult = await autoSearchSubjects();
 			if (api.statusPanel.getCourseRushMode()) {
-				const rushSelections = await loadSelections();
-				if (Object.keys(rushSelections).length > 0) {
-					api.logger.info("Course Rush Mode active - auto-triggering Load & Enroll");
-					api.statusPanel.addMessage("info", "Course Rush is enrolling saved courses...");
-					api.statusPanel.setCourseRushMode(false);
-					api.statusPanel.addMessage("info", "Course Rush started and turned itself off.");
-					let panelCount = getSubjectPanels().length;
-					if (panelCount === 0) {
-						const listingResult = await waitForSubjectListing({
-							timeoutMs: 6e4,
-							searchStartedAtMs: autoSearchResult.searchStartedAtMs ?? performance.now(),
-							allowAutoClick: !autoSearchResult.clickedSearchButton
-						});
-						panelCount = listingResult.panels;
-						if (panelCount === 0) {
-							if (listingResult.state === "request-failed" && listingResult.requestStatus !== null) {
-								api.logger.warn(`Rush Mode: subject search failed with status ${listingResult.requestStatus}`);
-								api.statusPanel.addMessage("warn", `Subject search failed (${listingResult.requestStatus}). Registration may not be open yet.`);
-							} else if (listingResult.state === "request-completed-no-panels") {
-								api.logger.warn("Rush Mode: subject search completed but no subjects were listed");
-								api.statusPanel.addMessage("warn", "Subject search completed, but no subjects were listed. Check filters or registration availability.");
-							} else {
-								api.logger.warn("Rush Mode: timed out waiting for subject listing - cannot auto-enroll");
-								api.statusPanel.addMessage("warn", "Timed out waiting for subjects to load. Try refreshing and enabling Rush Mode again.");
-							}
-							return;
-						}
+				api.logger.info("Course Rush Mode active - using Neptun timetable planner first");
+				api.statusPanel.setCourseRushMode(false);
+				api.statusPanel.addMessage("info", "Course Rush started and turned itself off. Waiting for Neptun timetable planner...");
+				const plannerResult = await enrollPlannedCourses({ plannerWaitTimeoutMs: PLANNER_TIMING.rushReadinessTimeoutMs });
+				if (!plannerResult.plannerReady) api.statusPanel.addMessage("warn", "Neptun timetable planner did not become ready. Local fallback was not started automatically; nothing else was clicked.");
+				else if (plannerResult.listedSubjects === 0 && plannerResult.plannedSubjects === 0 && plannerResult.attempted === 0 && !plannerResult.aborted) {
+					const rushSelections = await loadSelections();
+					if (Object.keys(rushSelections).length > 0) if (plannerResult.openedPlanner && closePlannerSafely()) await runLocalSavedRushFallback(api);
+					else {
+						api.logger.warn("Rush Mode: planner was already open and empty; local fallback was not started automatically");
+						api.statusPanel.addMessage("warn", "Planner is empty, but it was already open. Close it and use Local Load + Enroll for the saved fallback.");
 					}
-					if (panelCount === 0) {
-						api.logger.warn("Rush Mode: no subjects are listed - cannot auto-enroll");
-						api.statusPanel.addMessage("warn", "No subjects loaded. Try refreshing and enabling Rush Mode again.");
-						return;
-					}
-					loadAndEnroll().catch((err) => api.logger.error("rush auto-enroll failed:", err));
+					else api.statusPanel.addMessage("warn", "No planned subjects or locally saved fallback courses were found. Nothing was clicked.");
 				}
-			}
+			} else await autoSearchSubjects();
 			api.logger.info("initialized on registration page");
 		},
 		dispose() {
