@@ -111,7 +111,9 @@ export const courseStoreModule: NpuModule = {
     const rushOn = api.statusPanel.getCourseRushMode()
     if (rushOn) {
       api.logger.info('Course Rush Mode active - using Neptun timetable planner first')
-      api.statusPanel.setCourseRushMode(false)
+      // Disarm durably before clicking anything: an armed flag that survives a
+      // reload would silently start a second enrollment run.
+      await api.statusPanel.setCourseRushMode(false)
       api.statusPanel.addMessage(
         'info',
         'Course Rush started and turned itself off. Waiting for Neptun timetable planner...',

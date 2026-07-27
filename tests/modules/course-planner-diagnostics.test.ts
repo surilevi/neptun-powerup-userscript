@@ -9,7 +9,9 @@ describe('planner diagnostics', () => {
     document.body.innerHTML = ''
   })
 
-  it('always writes a structured, copyable event with a stable run id', () => {
+  // Logged as one pre-formatted string: Tampermonkey's sandboxed console renders
+  // object arguments as a collapsed "Object" that cannot be read or copied.
+  it('always writes a single readable line carrying the run id', () => {
     const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
     const diagnostics = createPlannerDiagnostics('preview')
 
@@ -18,17 +20,17 @@ describe('planner diagnostics', () => {
       readableCount: 2,
     })
 
-    expect(consoleSpy).toHaveBeenCalledWith(
-      '[NPU:planner]',
-      expect.objectContaining({
-        runId: diagnostics.runId,
-        operation: 'preview',
-        event: 'subject-list:ready',
-        elapsedMs: expect.any(Number),
-        panelCount: 2,
-        readableCount: 2,
-      }),
-    )
+    expect(consoleSpy).toHaveBeenCalledTimes(1)
+    const [line, ...extraArgs] = consoleSpy.mock.calls[0]
+    expect(extraArgs).toHaveLength(0)
+    expect(typeof line).toBe('string')
+    expect(line).toContain('[NPU:planner]')
+    expect(line).toContain(diagnostics.runId)
+    expect(line).toContain('preview')
+    expect(line).toContain('subject-list:ready')
+    expect(line).toContain('panelCount=2')
+    expect(line).toContain('readableCount=2')
+    expect(line).toMatch(/\+\d+ms/)
   })
 
   it('uses a new run id for each planner operation', () => {
@@ -60,13 +62,13 @@ describe('planner diagnostics', () => {
       entryPointTimeoutMs: 100,
       contentTimeoutMs: 1_000,
     })
-    const logEntries = consoleSpy.mock.calls.map((call) => call[1])
+    const logLines = consoleSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => line.includes('[NPU:planner]'))
 
-    expect(logEntries.length).toBeGreaterThan(3)
-    expect(new Set(logEntries.map((entry) => (entry as { runId: string }).runId))).toEqual(
-      new Set([snapshot.diagnosticRunId]),
-    )
-    expect(JSON.stringify(logEntries)).not.toContain('ABC12DE345')
-    expect(JSON.stringify(logEntries)).not.toContain('NE1')
+    expect(logLines.length).toBeGreaterThan(3)
+    expect(logLines.every((line) => line.includes(snapshot.diagnosticRunId))).toBe(true)
+    expect(logLines.join('\n')).not.toContain('ABC12DE345')
+    expect(logLines.join('\n')).not.toContain('NE1')
   })
 })

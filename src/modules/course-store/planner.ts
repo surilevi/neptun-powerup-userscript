@@ -6,6 +6,7 @@ import {
   type PlannerDiagnostics,
 } from './planner-diagnostics'
 import { PLANNER_TIMING } from './planner-policy'
+import { fetchPlannedSubjects, type PlannedSubject } from './planner-api'
 import {
   expandPanel,
   extractCourseCode,
@@ -19,6 +20,14 @@ const PLANNER_ROOT_SELECTOR = 'neptun-timetable-planner'
 const PLANNER_LIST_SELECTOR = 'neptun-timetable-planner-list-view'
 const PLANNER_TOGGLE_SELECTOR = 'button.timetable-planner__toggle-button'
 const PLANNER_VIEW_SELECT_ID = 'timetable-planner-view-typeSelect'
+
+/**
+ * Neptun renders the planner's subject list and the main registration list with
+ * the same `neptun-subject-list-item` component. Only the container id prefix
+ * distinguishes them, so it is the last line of defence against NPU ever acting
+ * on the full paginated registration list instead of the planner's short list.
+ */
+const PLANNER_SUBJECT_CONTAINER_ID_PREFIX = 'signed-and-scheduled-subjects'
 
 export interface PlannerPreparationOptions {
   entryPointTimeoutMs?: number
@@ -50,6 +59,8 @@ export interface PlannerSnapshot {
   contentReady: boolean
   listedSubjects: number
   subjects: PlannerSubjectTarget[]
+  /** Ground truth from Neptun's planner API; null when it was unavailable. */
+  plannedFromApi: PlannedSubject[] | null
   issues: string[]
 }
 
@@ -69,28 +80,27 @@ function isListViewText(text: string): boolean {
 
 function isPlannerExplicitlyEmpty(root: Element): boolean {
   const text = normalizeText(root.textContent ?? '')
+  if (!text) return false
+
   return [
     'nincs megjelenitheto adat',
-    'nincs tervezőhoz adott targy',
-    'nincs tervezőhöz adott tárgy',
+    'nincs tervezohoz adott targy',
     'no planned subjects',
     'no data to display',
-  ].some((message) => text.includes(normalizeText(message)))
+  ].some((message) => text.includes(message))
 }
 
-async function waitForValue<T>(
-  read: () => T | null,
-  timeoutMs: number = PLANNER_TIMING.interactiveReadinessTimeoutMs,
-): Promise<T | null> {
-  const startedAt = Date.now()
-  let value = read()
+export function getPlannerRoot(): Element | null {
+  return document.querySelector(PLANNER_ROOT_SELECTOR)
+}
 
-  while (value === null && Date.now() - startedAt < timeoutMs) {
-    await delay(PLANNER_TIMING.domPollIntervalMs)
-    value = read()
-  }
-
-  return value
+/**
+ * The planner host and its list view are both planner-only components, so either
+ * ancestor proves an element belongs to the planner rather than to the main
+ * registration list.
+ */
+function isInPlannerScope(element: Element): boolean {
+  return element.closest(`${PLANNER_ROOT_SELECTOR}, ${PLANNER_LIST_SELECTOR}`) !== null
 }
 
 export function getPlannerListRoot(): Element | null {
@@ -101,8 +111,38 @@ export function getPlannerListRoot(): Element | null {
   )
 }
 
-function getPlannerRoot(): Element | null {
-  return document.querySelector(PLANNER_ROOT_SELECTOR)
+/**
+ * Planner subject panels, scoped to an explicit root.
+ *
+ * The root is required on purpose. An earlier version defaulted to `document`
+ * when the planner list was missing, which silently matched every subject of the
+ * main registration list instead.
+ */
+export function getPlannerSubjectPanels(root: ParentNode): Element[] {
+  const scoped = Array.from(root.querySelectorAll('neptun-subject-list-item mat-expansion-panel'))
+  const panels =
+    scoped.length > 0 ? scoped : Array.from(root.querySelectorAll('mat-expansion-panel'))
+
+  return panels.filter(isPlannerSubjectPanel)
+}
+
+function isPlannerSubjectPanel(panel: Element): boolean {
+  if (!isInPlannerScope(panel)) return false
+
+  // When ids are present, require the planner's own container prefix.
+  const container = panel.closest('[id]')
+  const id = container?.id ?? ''
+  if (!id) return true
+
+  return (
+    !id.startsWith('subject-registration') || id.startsWith(PLANNER_SUBJECT_CONTAINER_ID_PREFIX)
+  )
+}
+
+export function findPlannerSubjectPanel(subjectCode: string, root: ParentNode): Element | null {
+  return (
+    getPlannerSubjectPanels(root).find((panel) => extractSubjectCode(panel) === subjectCode) ?? null
+  )
 }
 
 function isPlannerToggleText(text: string): boolean {
@@ -111,11 +151,9 @@ function isPlannerToggleText(text: string): boolean {
 }
 
 function findPlannerToggle(): HTMLButtonElement | null {
-  const exactMatches = Array.from(
-    document.querySelectorAll<HTMLButtonElement>(PLANNER_TOGGLE_SELECTOR),
-  )
-  const availableExactMatch = exactMatches.find((button) => isElementAvailable(button))
-  if (availableExactMatch) return availableExactMatch
+  const exact = Array.from(document.querySelectorAll<HTMLButtonElement>(PLANNER_TOGGLE_SELECTOR))
+  const availableExact = exact.find((button) => isElementAvailable(button))
+  if (availableExact) return availableExact
 
   return (
     Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
@@ -126,21 +164,6 @@ function findPlannerToggle(): HTMLButtonElement | null {
         ),
     ) ?? null
   )
-}
-
-function getPlannerToggleAction(button: HTMLButtonElement): 'open' | 'close' | 'unknown' {
-  const label = normalizeText(
-    `${button.getAttribute('aria-label') ?? ''} ${button.textContent ?? ''}`,
-  )
-
-  if (label.includes('megnyit') || label.includes('open')) return 'open'
-  if (label.includes('bezar') || label.includes('close')) return 'close'
-
-  if (isPlannerToggleText(label)) {
-    return getPlannerListRoot() || findPlannerViewControl() ? 'close' : 'open'
-  }
-
-  return 'unknown'
 }
 
 function findPlannerViewControl(): HTMLElement | null {
@@ -167,38 +190,174 @@ function getViewClickTarget(control: HTMLElement): HTMLElement {
 }
 
 function findListViewOption(): HTMLElement | null {
-  const options = Array.from(document.querySelectorAll<HTMLElement>('mat-option, [role="option"]'))
   return (
-    options.find(
+    Array.from(document.querySelectorAll<HTMLElement>('mat-option, [role="option"]')).find(
       (option) => isElementAvailable(option) && isListViewText(option.textContent ?? ''),
     ) ?? null
   )
 }
 
-type PlannerEntryPoint =
-  | { type: 'list'; element: Element }
-  | { type: 'view'; element: HTMLElement }
-  | { type: 'toggle'; element: HTMLButtonElement }
+type PlannerOpenState = 'open' | 'closed' | 'unknown'
 
-function findSafePlannerEntryPoint(): PlannerEntryPoint | null {
-  const list = getPlannerListRoot()
-  if (list) return { type: 'list', element: list }
-
-  const view = findPlannerViewControl()
-  if (view) return { type: 'view', element: view }
+/**
+ * Rendered planner content proves it is open. The toggle's aria-label is only
+ * consulted when there is no content yet, because that label is precisely what
+ * flips underneath us while Neptun is still opening the planner itself.
+ */
+function readPlannerOpenState(): PlannerOpenState {
+  if (getPlannerListRoot() || findPlannerViewControl()) return 'open'
 
   const toggle = findPlannerToggle()
-  if (toggle && getPlannerToggleAction(toggle) !== 'unknown') {
-    return { type: 'toggle', element: toggle }
-  }
+  if (!toggle) return 'unknown'
 
-  return null
+  const label = normalizeText(
+    `${toggle.getAttribute('aria-label') ?? ''} ${toggle.textContent ?? ''}`,
+  )
+  if (label.includes('megnyit') || label.includes('open')) return 'closed'
+  if (label.includes('bezar') || label.includes('close')) return 'open'
+
+  // A control that only names the planner, with nothing rendered yet, is closed.
+  if (isPlannerToggleText(label)) return 'closed'
+
+  // Anything else is an unidentified control and must never be clicked blindly.
+  return 'unknown'
 }
 
-function finishPreparation(
+/**
+ * Rate-limits repeated clicks on the same planner control.
+ *
+ * Neptun opens the planner by itself during page load. Clicking on every poll
+ * tick would fight that and leave the planner closed, which is exactly the
+ * failure this gate exists to prevent.
+ */
+class ControlActionGate {
+  private readonly lastActionAt = new Map<string, number>()
+  private readonly attempts = new Map<string, number>()
+
+  canAct(key: string, cooldownMs: number): boolean {
+    if (this.attemptsFor(key) >= PLANNER_TIMING.controlActionMaxAttempts) return false
+
+    const last = this.lastActionAt.get(key)
+    return last === undefined || Date.now() - last >= cooldownMs
+  }
+
+  record(key: string): void {
+    this.lastActionAt.set(key, Date.now())
+    this.attempts.set(key, this.attemptsFor(key) + 1)
+  }
+
+  attemptsFor(key: string): number {
+    return this.attempts.get(key) ?? 0
+  }
+}
+
+/**
+ * Drive the planner into "list view, rendered" by repeatedly observing state and
+ * taking at most one corrective step per tick.
+ *
+ * Every step is re-verified on the next tick instead of being assumed to have
+ * worked, so a click that Angular swallowed, a view that reverts, or a planner
+ * that Neptun closes again all self-correct until the deadline.
+ */
+async function acquirePlannerListView(
+  deadline: number,
   diagnostics: PlannerDiagnostics,
-  result: PlannerPreparationResult,
-): PlannerPreparationResult {
+): Promise<PlannerPreparationResult> {
+  const gate = new ControlActionGate()
+  let openedPlanner = false
+  let switchedToList = false
+  let lastState = ''
+
+  while (Date.now() < deadline) {
+    const listRoot = getPlannerListRoot()
+    if (listRoot) {
+      return { root: listRoot, openedPlanner, switchedToList, error: null }
+    }
+
+    const openState = readPlannerOpenState()
+    const viewControl = findPlannerViewControl()
+    const state = `${openState}|${viewControl ? 'view' : 'no-view'}`
+    if (state !== lastState) {
+      lastState = state
+      diagnostics.log('acquire:state', {
+        open: openState,
+        viewControl: viewControl !== null,
+        toggleAttempts: gate.attemptsFor('toggle'),
+        viewAttempts: gate.attemptsFor('view'),
+      })
+    }
+
+    if (openState === 'closed') {
+      // The settle window is what stops NPU from racing Neptun's own auto-open:
+      // a click is given time to take effect before the state is judged again.
+      const toggle = findPlannerToggle()
+      if (toggle && gate.canAct('toggle', PLANNER_TIMING.controlActionSettleMs)) {
+        diagnostics.log('acquire:toggle-click', { attempt: gate.attemptsFor('toggle') + 1 })
+        toggle.click()
+        gate.record('toggle')
+        openedPlanner = true
+      }
+
+      await delay(PLANNER_TIMING.domPollIntervalMs)
+      continue
+    }
+
+    // Planner is open (or still rendering). Nudge the view selector to list view.
+    if (viewControl && !isListViewText(viewControl.textContent ?? '')) {
+      const listOption = findListViewOption()
+      if (listOption) {
+        diagnostics.log('acquire:list-option-click')
+        listOption.click()
+        gate.record('view')
+        switchedToList = true
+      } else if (gate.canAct('view', PLANNER_TIMING.controlActionCooldownMs)) {
+        diagnostics.log('acquire:view-selector-click', { attempt: gate.attemptsFor('view') + 1 })
+        getViewClickTarget(viewControl).click()
+        gate.record('view')
+      }
+    }
+
+    // Once the click budget is spent NPU stops acting but keeps observing:
+    // a slow planner may still finish opening well within the deadline.
+    await delay(PLANNER_TIMING.domPollIntervalMs)
+  }
+
+  return {
+    root: null,
+    openedPlanner,
+    switchedToList,
+    error: describeAcquisitionFailure(readPlannerOpenState(), gate),
+  }
+}
+
+function describeAcquisitionFailure(state: PlannerOpenState, gate: ControlActionGate): string {
+  if (state === 'unknown') {
+    return 'Neptun timetable planner toggle action could not be identified safely'
+  }
+
+  if (state === 'closed') {
+    return gate.attemptsFor('toggle') > 0
+      ? `Neptun timetable planner did not stay open after ${gate.attemptsFor('toggle')} attempts`
+      : 'Neptun timetable planner did not open in time'
+  }
+
+  return 'Neptun timetable planner list did not render in time'
+}
+
+export async function preparePlannerListView(
+  options: PlannerPreparationOptions = {},
+): Promise<PlannerPreparationResult> {
+  const diagnostics =
+    options.diagnostics ?? createPlannerDiagnostics(options.operation ?? 'prepare')
+  const timeoutMs = options.entryPointTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs
+
+  diagnostics.log('prepare:start', {
+    readinessTimeoutMs: timeoutMs,
+    pollIntervalMs: PLANNER_TIMING.domPollIntervalMs,
+  })
+
+  const result = await acquirePlannerListView(Date.now() + timeoutMs, diagnostics)
+
   diagnostics.log(result.root ? 'prepare:ready' : 'prepare:failed', {
     openedPlanner: result.openedPlanner,
     switchedToList: result.switchedToList,
@@ -207,176 +366,12 @@ function finishPreparation(
   return result
 }
 
-export async function preparePlannerListView(
-  options: PlannerPreparationOptions = {},
-): Promise<PlannerPreparationResult> {
-  const diagnostics =
-    options.diagnostics ?? createPlannerDiagnostics(options.operation ?? 'prepare')
-  const entryPointTimeoutMs =
-    options.entryPointTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs
-  diagnostics.log('prepare:start', {
-    readinessTimeoutMs: entryPointTimeoutMs,
-    pollIntervalMs: PLANNER_TIMING.domPollIntervalMs,
-  })
-
-  const existingList = getPlannerListRoot()
-  if (existingList) {
-    return finishPreparation(diagnostics, {
-      root: existingList,
-      openedPlanner: false,
-      switchedToList: false,
-      error: null,
-    })
-  }
-
-  let openedPlanner = false
-  diagnostics.log('entry-point:waiting', {
-    timeoutMs: entryPointTimeoutMs,
-  })
-  const entryPoint = await waitForValue(findSafePlannerEntryPoint, entryPointTimeoutMs)
-
-  if (!entryPoint) {
-    const unidentifiedToggle = findPlannerToggle()
-    return finishPreparation(diagnostics, {
-      root: null,
-      openedPlanner,
-      switchedToList: false,
-      error: unidentifiedToggle
-        ? 'Neptun timetable planner toggle appeared, but its action could not be identified safely'
-        : `Neptun timetable planner controls did not appear within ${Math.ceil(entryPointTimeoutMs / 1000)} seconds`,
-    })
-  }
-  diagnostics.log('entry-point:ready', { type: entryPoint.type })
-
-  if (entryPoint.type === 'list') {
-    return finishPreparation(diagnostics, {
-      root: entryPoint.element,
-      openedPlanner: false,
-      switchedToList: false,
-      error: null,
-    })
-  }
-
-  let viewControl = entryPoint.type === 'view' ? entryPoint.element : findPlannerViewControl()
-
-  if (!viewControl) {
-    const toggle =
-      entryPoint.type === 'toggle' && entryPoint.element.isConnected
-        ? entryPoint.element
-        : findPlannerToggle()
-    if (!toggle) {
-      return finishPreparation(diagnostics, {
-        root: null,
-        openedPlanner,
-        switchedToList: false,
-        error: 'Neptun timetable planner toggle was not found',
-      })
-    }
-
-    const action = getPlannerToggleAction(toggle)
-    if (action !== 'open') {
-      return finishPreparation(diagnostics, {
-        root: null,
-        openedPlanner,
-        switchedToList: false,
-        error:
-          action === 'close'
-            ? 'Neptun timetable planner is open but its view selector is not ready'
-            : 'Neptun timetable planner toggle action could not be identified safely',
-      })
-    }
-
-    diagnostics.log('planner-toggle:click', { action })
-    toggle.click()
-    openedPlanner = true
-
-    diagnostics.log('planner-open:waiting', { timeoutMs: entryPointTimeoutMs })
-    const plannerReady = await waitForValue(() => {
-      const list = getPlannerListRoot()
-      if (list) return { list, viewControl: null }
-
-      const control = findPlannerViewControl()
-      return control ? { list: null, viewControl: control } : null
-    }, entryPointTimeoutMs)
-    if (plannerReady?.list) {
-      return finishPreparation(diagnostics, {
-        root: plannerReady.list,
-        openedPlanner,
-        switchedToList: false,
-        error: null,
-      })
-    }
-
-    viewControl = plannerReady?.viewControl ?? null
-    if (!viewControl) {
-      return finishPreparation(diagnostics, {
-        root: null,
-        openedPlanner,
-        switchedToList: false,
-        error: 'Neptun timetable planner did not finish opening',
-      })
-    }
-  }
-
-  if (isListViewText(viewControl.textContent ?? '')) {
-    diagnostics.log('list-view:waiting', { timeoutMs: entryPointTimeoutMs })
-    const listRoot = await waitForValue(getPlannerListRoot, entryPointTimeoutMs)
-    return finishPreparation(diagnostics, {
-      root: listRoot,
-      openedPlanner,
-      switchedToList: false,
-      error: listRoot ? null : 'Neptun timetable planner list did not render',
-    })
-  }
-
-  diagnostics.log('view-selector:click')
-  getViewClickTarget(viewControl).click()
-  diagnostics.log('list-option:waiting', { timeoutMs: entryPointTimeoutMs })
-  const listOption = await waitForValue(findListViewOption, entryPointTimeoutMs)
-  if (!listOption) {
-    return finishPreparation(diagnostics, {
-      root: null,
-      openedPlanner,
-      switchedToList: false,
-      error: 'Neptun timetable planner list-view option was not found',
-    })
-  }
-
-  diagnostics.log('list-option:click')
-  listOption.click()
-  diagnostics.log('list-view:waiting', { timeoutMs: entryPointTimeoutMs })
-  const listRoot = await waitForValue(getPlannerListRoot, entryPointTimeoutMs)
-  return finishPreparation(diagnostics, {
-    root: listRoot,
-    openedPlanner,
-    switchedToList: true,
-    error: listRoot ? null : 'Neptun timetable planner list did not render',
-  })
-}
-
-export function getPlannerSubjectPanels(
-  root: ParentNode = getPlannerListRoot() ?? document,
-): Element[] {
-  const scopedPanels = Array.from(
-    root.querySelectorAll('neptun-subject-list-item mat-expansion-panel'),
-  )
-  if (scopedPanels.length > 0) return scopedPanels
-
-  return Array.from(root.querySelectorAll('mat-expansion-panel'))
-}
-
-export function findPlannerSubjectPanel(
-  subjectCode: string,
-  root: ParentNode = getPlannerListRoot() ?? document,
-): Element | null {
-  return (
-    getPlannerSubjectPanels(root).find((panel) => extractSubjectCode(panel) === subjectCode) ?? null
-  )
-}
-
 function findEnrollmentButton(panel: Element): HTMLButtonElement | null {
-  const buttons = Array.from(panel.querySelectorAll<HTMLButtonElement>('button'))
-  return buttons.find((button) => isEnrollButtonText(button.textContent ?? '')) ?? null
+  return (
+    Array.from(panel.querySelectorAll<HTMLButtonElement>('button')).find((button) =>
+      isEnrollButtonText(button.textContent ?? ''),
+    ) ?? null
+  )
 }
 
 function readExpandedPlannerSubject(subjectCode: string, panel: Element): PlannerSubjectTarget {
@@ -433,17 +428,56 @@ export function readPlannerSubjectTarget(
   return readExpandedPlannerSubject(subjectCode, panel)
 }
 
-function finishSnapshot(
+/**
+ * Wait until the planner's subject list has stopped changing.
+ *
+ * Emptiness is only ever concluded from a positive signal — Neptun's explicit
+ * empty-state text, or the planner API reporting zero planned subjects — never
+ * from "no panels yet", which is also what a slow connection looks like.
+ */
+async function waitForStableSubjectList(
+  root: Element,
+  deadline: number,
+  apiPlannedCount: number | null,
   diagnostics: PlannerDiagnostics,
-  snapshot: PlannerSnapshot,
-): PlannerSnapshot {
-  diagnostics.log('snapshot:complete', {
-    contentReady: snapshot.contentReady,
-    listedSubjects: snapshot.listedSubjects,
-    readableSubjects: snapshot.subjects.length,
-    issueCount: snapshot.issues.length,
-  })
-  return snapshot
+): Promise<{ panels: Element[]; explicitlyEmpty: boolean }> {
+  let lastSignature = ''
+  let stableSince = Date.now()
+
+  while (Date.now() < deadline) {
+    const panels = getPlannerSubjectPanels(root)
+    const codes = panels.map((panel) => extractSubjectCode(panel))
+    const allCodesReady = panels.length > 0 && codes.every((code) => code !== null)
+
+    if (allCodesReady) {
+      // Trust the API's count when we have it: the DOM is only settled once it agrees.
+      const matchesApi = apiPlannedCount === null || panels.length >= apiPlannedCount
+      const signature = codes.join('|')
+
+      if (matchesApi && signature === lastSignature) {
+        if (Date.now() - stableSince >= PLANNER_TIMING.listStabilityWindowMs) {
+          return { panels, explicitlyEmpty: false }
+        }
+      } else {
+        lastSignature = signature
+        stableSince = Date.now()
+      }
+    }
+
+    if (apiPlannedCount === 0) {
+      diagnostics.log('subject-list:empty-confirmed-by-api')
+      return { panels: [], explicitlyEmpty: true }
+    }
+
+    if (panels.length === 0 && isPlannerExplicitlyEmpty(root)) {
+      diagnostics.log('subject-list:empty-state-rendered')
+      return { panels: [], explicitlyEmpty: true }
+    }
+
+    await delay(PLANNER_TIMING.domPollIntervalMs)
+  }
+
+  return { panels: getPlannerSubjectPanels(root), explicitlyEmpty: false }
 }
 
 export async function collectPlannerSnapshot(
@@ -451,64 +485,70 @@ export async function collectPlannerSnapshot(
 ): Promise<PlannerSnapshot> {
   const diagnostics =
     options.diagnostics ?? createPlannerDiagnostics(options.operation ?? 'prepare')
-  const preparation = await preparePlannerListView({
-    ...options,
-    diagnostics,
+  const contentTimeoutMs = options.contentTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs
+
+  // Ground truth is fetched in parallel with opening the planner: it costs
+  // nothing on the critical path and tells us what the DOM *should* converge to.
+  const apiPromise = fetchPlannedSubjects().catch(() => null)
+
+  const preparation = await preparePlannerListView({ ...options, diagnostics })
+  const apiResult = await apiPromise
+  const plannedFromApi = apiResult?.ok ? apiResult.subjects : null
+  const apiPlannedCount = plannedFromApi?.length ?? null
+
+  diagnostics.log('api:planned-subjects', {
+    ok: apiResult?.ok ?? false,
+    failure: apiResult?.failure ?? 'unavailable',
+    count: apiPlannedCount,
   })
+
   if (!preparation.root) {
-    return finishSnapshot(diagnostics, {
+    return {
       diagnosticRunId: diagnostics.runId,
       preparation,
       contentReady: false,
       listedSubjects: 0,
       subjects: [],
+      plannedFromApi,
       issues: [preparation.error ?? 'Neptun timetable planner list is unavailable'],
-    })
+    }
   }
 
   const issues: string[] = []
   const subjects: PlannerSubjectTarget[] = []
-  const contentTimeoutMs = options.contentTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs
+  const contentDeadline = Date.now() + contentTimeoutMs
+
   diagnostics.log('subject-list:waiting', {
     timeoutMs: contentTimeoutMs,
     stabilityWindowMs: PLANNER_TIMING.listStabilityWindowMs,
+    expectedFromApi: apiPlannedCount,
   })
-  let lastSignature = ''
-  let stableSince = 0
-  const startedWaitingAt = Date.now()
 
-  while (Date.now() - startedWaitingAt < contentTimeoutMs) {
-    const panels = getPlannerSubjectPanels(preparation.root)
-    const codes = panels.map((panel) => extractSubjectCode(panel))
-    const allCodesReady = panels.length > 0 && codes.every((code) => code !== null)
-    const signature = allCodesReady ? codes.join('|') : ''
+  const { panels: plannerPanels, explicitlyEmpty } = await waitForStableSubjectList(
+    preparation.root,
+    contentDeadline,
+    apiPlannedCount,
+    diagnostics,
+  )
 
-    if (signature && signature === lastSignature) {
-      if (Date.now() - stableSince >= PLANNER_TIMING.listStabilityWindowMs) {
-        break
-      }
-    } else {
-      lastSignature = signature
-      stableSince = Date.now()
-    }
-
-    if (isPlannerExplicitlyEmpty(preparation.root)) break
-    await delay(PLANNER_TIMING.domPollIntervalMs)
-  }
-
-  const plannerPanels = getPlannerSubjectPanels(preparation.root)
   const subjectEntries = plannerPanels
     .map((panel) => ({ panel, subjectCode: extractSubjectCode(panel) }))
     .filter((entry): entry is { panel: Element; subjectCode: string } => entry.subjectCode !== null)
 
   if (subjectEntries.length === 0) {
-    const explicitlyEmpty = isPlannerExplicitlyEmpty(preparation.root)
-    return finishSnapshot(diagnostics, {
+    diagnostics.log('snapshot:complete', {
+      contentReady: explicitlyEmpty,
+      listedSubjects: plannerPanels.length,
+      readableSubjects: 0,
+      issueCount: 1,
+    })
+    return {
       diagnosticRunId: diagnostics.runId,
       preparation,
       contentReady: explicitlyEmpty,
       listedSubjects: plannerPanels.length,
       subjects,
+      plannedFromApi,
       issues: [
         explicitlyEmpty
           ? 'No planned subjects are visible in Neptun timetable planner list view'
@@ -516,13 +556,14 @@ export async function collectPlannerSnapshot(
             ? 'Neptun timetable planner subjects did not finish loading'
             : 'Planner subjects are visible, but their subject codes could not be read safely',
       ],
-    })
+    }
   }
 
   diagnostics.log('subject-list:ready', {
     panelCount: plannerPanels.length,
     readableCount: subjectEntries.length,
   })
+
   const expandedEntries: Array<{ panel: Element; subjectCode: string }> = []
   for (const { subjectCode, panel } of subjectEntries) {
     if (!panel.isConnected) {
@@ -542,7 +583,7 @@ export async function collectPlannerSnapshot(
     expandedCount: expandedEntries.length,
     failedCount: subjectEntries.length - expandedEntries.length,
   })
-  const contentDeadline = Date.now() + contentTimeoutMs
+
   diagnostics.log('course-rows:waiting', { timeoutMs: contentTimeoutMs })
   while (
     Date.now() < contentDeadline &&
@@ -567,14 +608,22 @@ export async function collectPlannerSnapshot(
     if (liveTarget.issue) issues.push(liveTarget.issue)
   }
 
-  return finishSnapshot(diagnostics, {
+  diagnostics.log('snapshot:complete', {
+    contentReady: true,
+    listedSubjects: plannerPanels.length,
+    readableSubjects: subjects.length,
+    issueCount: issues.length,
+  })
+
+  return {
     diagnosticRunId: diagnostics.runId,
     preparation,
     contentReady: true,
     listedSubjects: plannerPanels.length,
     subjects,
+    plannedFromApi,
     issues,
-  })
+  }
 }
 
 export function closePlannerIfOpenedByNpu(preparation: PlannerPreparationResult): boolean {
@@ -583,8 +632,10 @@ export function closePlannerIfOpenedByNpu(preparation: PlannerPreparationResult)
 }
 
 export function closePlannerSafely(): boolean {
+  if (readPlannerOpenState() !== 'open') return false
+
   const toggle = findPlannerToggle()
-  if (!toggle || getPlannerToggleAction(toggle) !== 'close') return false
+  if (!toggle) return false
 
   toggle.click()
   return true

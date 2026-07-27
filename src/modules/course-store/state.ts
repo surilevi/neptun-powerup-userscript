@@ -1,11 +1,12 @@
 import type { ModuleApi } from '../../types/modules'
+import { PLANNER_TIMING } from './planner-policy'
 
 export interface CourseSelections {
   [subjectCode: string]: string[]
 }
 
-/** Max time to wait for a panel to expand */
-export const WAIT_TIMEOUT_MS = 5000
+/** Max time to wait for a panel to expand. Sourced from the shared timing policy. */
+export const WAIT_TIMEOUT_MS = PLANNER_TIMING.panelExpandTimeoutMs
 
 export const STORAGE_KEY = 'courseSelections'
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neptun PowerUp! Userscript
 // @namespace    https://github.com/surilevi/neptun-powerup-userscript
-// @version      3.4.0
+// @version      3.4.1
 // @author       surilevi
 // @description  Neptun PowerUp! userscript for course and exam workflows
 // @license      MIT
@@ -170,9 +170,9 @@
 			toggle: () => {},
 			isExpanded: () => false,
 			getCourseRushMode: () => false,
-			setCourseRushMode: () => {},
+			setCourseRushMode: () => Promise.resolve(),
 			getExamRushMode: () => false,
-			setExamRushMode: () => {},
+			setExamRushMode: () => Promise.resolve(),
 			getThemeSettings: () => ({
 				enabled: false,
 				color: "pink"
@@ -426,6 +426,12 @@ mat-expansion-panel {
 			api$4 = null;
 		}
 	};
+	function getScriptVersion() {
+		try {
+			if (typeof GM !== "undefined" && GM.info?.script?.version) return GM.info.script.version;
+		} catch {}
+		return "dev";
+	}
 	var MAX_MESSAGES = 5;
 	var COLORS = {
 		bg: "#16213e",
@@ -583,6 +589,17 @@ mat-expansion-panel {
     `;
 			titleSpanRef.textContent = "Neptun PowerUp!";
 			header.appendChild(titleSpanRef);
+			const versionSpan = document.createElement("span");
+			versionSpan.style.cssText = `
+      font-size: 10px;
+      font-weight: 600;
+      color: ${COLORS.textMuted};
+      margin-right: 8px;
+      flex-shrink: 0;
+    `;
+			versionSpan.textContent = `v${getScriptVersion()}`;
+			versionSpan.title = "Installed Neptun PowerUp! userscript version";
+			header.appendChild(versionSpan);
 			headerDot = document.createElement("span");
 			headerDot.style.cssText = `
       width: 8px;
@@ -1068,18 +1085,22 @@ mat-expansion-panel {
 		function getCourseRushMode() {
 			return courseRushOn;
 		}
-		function setCourseRushModeValue(on) {
+		async function setCourseRushModeValue(on) {
+			if (courseRushOn === on) return;
 			courseRushOn = on;
 			if (courseRushToggle) courseRushToggle.checked = on;
 			updateDots();
+			await rushCallbacks?.onCourseRushChange(on);
 		}
 		function getExamRushMode() {
 			return examRushOn;
 		}
-		function setExamRushModeValue(on) {
+		async function setExamRushModeValue(on) {
+			if (examRushOn === on) return;
 			examRushOn = on;
 			if (examRushToggle) examRushToggle.checked = on;
 			updateDots();
+			await rushCallbacks?.onExamRushChange(on);
 		}
 		function dispose() {
 			stopCountdown();
@@ -1744,7 +1765,29 @@ mat-expansion-panel {
 			api$3 = null;
 		}
 	};
-	var WAIT_TIMEOUT_MS = 5e3;
+	var PLANNER_TIMING = Object.freeze({
+		interactiveReadinessTimeoutMs: 3e4,
+		rushReadinessTimeoutMs: 6e4,
+		enrollmentRequestTimeoutMs: 3e4,
+		enrollmentUiUpdateTimeoutMs: 5e3,
+		listStabilityWindowMs: 500,
+		domPollIntervalMs: 50,
+		outcomePollIntervalMs: 100,
+		controlActionCooldownMs: 1200,
+		controlActionSettleMs: 3e3,
+		controlActionMaxAttempts: 3,
+		panelExpandTimeoutMs: 5e3,
+		panelExpandFallbackMs: 800,
+		domStateSettleMs: 150,
+		enrollmentMaxAttempts: 3,
+		enrollmentRetryBaseDelayMs: 700,
+		notificationSettleMs: 1500,
+		apiRequestTimeoutMs: 8e3,
+		apiMaxAttempts: 3,
+		apiRetryBaseDelayMs: 400,
+		apiConfirmationDelayMs: 600
+	});
+	var WAIT_TIMEOUT_MS = PLANNER_TIMING.panelExpandTimeoutMs;
 	var STORAGE_KEY$2 = "courseSelections";
 	var api$2 = null;
 	var isEnrolling = false;
@@ -2418,7 +2461,7 @@ mat-expansion-panel {
 		api?.logger.info("[dom-debug] expandPanel: clicked header, waiting for course items...");
 		if (!await waitForElement(".course-list-item-container", panel)) {
 			api?.logger.warn("[dom-debug] expandPanel: waitForElement timed out, using fallback delay");
-			await delay(800);
+			await delay(PLANNER_TIMING.panelExpandFallbackMs);
 		}
 		const result = isPanelExpanded(panel);
 		api?.logger.info(`[dom-debug] expandPanel: completed, expanded=${result}`);
@@ -2455,7 +2498,7 @@ mat-expansion-panel {
 				} else api?.logger.warn("[dom-debug] toggleCourse: no click target found");
 			}
 		}
-		await delay(100);
+		await delay(PLANNER_TIMING.domStateSettleMs);
 		if (wasBefore === isCourseSelected(courseItem)) api?.logger.warn("toggleCourse: --selected class did not change after click");
 	}
 	async function loadStoredSelections() {
@@ -2680,6 +2723,9 @@ mat-expansion-panel {
 			return Date.now();
 		}
 	}
+	function formatDetails(details) {
+		return Object.entries(details).filter(([, value]) => value !== void 0).map(([key, value]) => `${key}=${value === null ? "null" : String(value)}`).join(" ");
+	}
 	function createPlannerDiagnostics(operation) {
 		const startedAt = monotonicNow();
 		const runId = `planner-${Date.now().toString(36)}-${++runSequence}`;
@@ -2687,30 +2733,193 @@ mat-expansion-panel {
 			runId,
 			log(event, details = {}) {
 				try {
-					console.info("[NPU:planner]", {
-						runId,
-						operation,
-						event,
-						elapsedMs: Math.round(monotonicNow() - startedAt),
-						...details
-					});
+					const elapsedMs = Math.round(monotonicNow() - startedAt);
+					const tail = formatDetails(details);
+					console.info(`[NPU:planner] ${runId} ${operation} +${elapsedMs}ms ${event}${tail ? ` ${tail}` : ""}`);
 				} catch {}
 			}
 		};
 	}
-	var PLANNER_TIMING = Object.freeze({
-		interactiveReadinessTimeoutMs: 3e4,
-		rushReadinessTimeoutMs: 6e4,
-		enrollmentRequestTimeoutMs: 3e4,
-		enrollmentUiUpdateTimeoutMs: 5e3,
-		listStabilityWindowMs: 500,
-		domPollIntervalMs: 50,
-		outcomePollIntervalMs: 100
-	});
+	var PLANNED_SUBJECTS_ENDPOINT = "SubjectApplication/ScheduledSubjectsWithScheduledCourses";
+	var WARNING_MODAL_STATES_ENDPOINT = "ContextUserProfile/GetSubjectSigninWarningModalsStates";
+	function readAccessToken() {
+		try {
+			return sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken);
+		} catch {
+			return null;
+		}
+	}
+	function resolveApiBase() {
+		try {
+			const entry = performance.getEntriesByType("resource").map((resource) => resource.name).find((name) => name.includes("/api/SubjectApplication/"));
+			if (entry) {
+				const marker = entry.indexOf("/api/");
+				if (marker !== -1) return entry.slice(0, marker + 5);
+			}
+		} catch {}
+		const prefix = window.location.pathname.split("/")[1] || "hallgatoi";
+		return `${window.location.origin}/${prefix}/api/`;
+	}
+	function resolveTermId() {
+		let latest = null;
+		try {
+			for (const resource of performance.getEntriesByType("resource")) {
+				if (!resource.name.includes("/api/SubjectApplication/")) continue;
+				let termId = null;
+				try {
+					termId = new URL(resource.name).searchParams.get("request.termId");
+				} catch {
+					continue;
+				}
+				if (!termId) continue;
+				if (!latest || resource.startTime >= latest.startTime) latest = {
+					termId,
+					startTime: resource.startTime
+				};
+			}
+		} catch {
+			return null;
+		}
+		return latest?.termId ?? null;
+	}
+	function isPlannerApiUsable() {
+		return readAccessToken() !== null && resolveTermId() !== null;
+	}
+	function isRetryableStatus(status) {
+		return status === 429 || status >= 500;
+	}
+	async function getJson(path, params) {
+		const token = readAccessToken();
+		if (!token) return {
+			envelope: null,
+			failure: "no-token",
+			status: null
+		};
+		const url = new URL(resolveApiBase() + path);
+		for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+		let lastStatus = null;
+		let lastFailure = "network";
+		for (let attempt = 1; attempt <= PLANNER_TIMING.apiMaxAttempts; attempt++) {
+			const controller = new AbortController();
+			const timer = setTimeout(() => controller.abort(), PLANNER_TIMING.apiRequestTimeoutMs);
+			try {
+				const response = await fetch(url.toString(), {
+					method: "GET",
+					headers: {
+						Authorization: `Bearer ${token}`,
+						Accept: "application/json"
+					},
+					credentials: "include",
+					signal: controller.signal
+				});
+				lastStatus = response.status;
+				if (response.status === 401 || response.status === 403) return {
+					envelope: null,
+					failure: "unauthorized",
+					status: response.status
+				};
+				if (!response.ok) {
+					lastFailure = "server-error";
+					if (!isRetryableStatus(response.status)) return {
+						envelope: null,
+						failure: "server-error",
+						status: response.status
+					};
+				} else try {
+					return {
+						envelope: await response.json(),
+						failure: null,
+						status: response.status
+					};
+				} catch {
+					return {
+						envelope: null,
+						failure: "malformed",
+						status: response.status
+					};
+				}
+			} catch {
+				lastFailure = "network";
+			} finally {
+				clearTimeout(timer);
+			}
+			if (attempt < PLANNER_TIMING.apiMaxAttempts) await delay(PLANNER_TIMING.apiRetryBaseDelayMs * attempt);
+		}
+		return {
+			envelope: null,
+			failure: lastFailure,
+			status: lastStatus
+		};
+	}
+	function asRecord(value) {
+		return typeof value === "object" && value !== null ? value : null;
+	}
+	function toPlannedSubject(raw) {
+		const record = asRecord(raw);
+		if (!record) return null;
+		const code = typeof record.code === "string" ? record.code.trim() : "";
+		if (!code) return null;
+		const courseIds = Array.isArray(record.scheduledCourseIds) ? record.scheduledCourseIds.filter((id) => typeof id === "string") : [];
+		const uiState = asRecord(record.uiDisplayState);
+		return {
+			code,
+			title: typeof record.title === "string" ? record.title : "",
+			scheduledCourseIds: courseIds,
+			isRegistered: record.isRegistered === true,
+			isWaiting: record.isWaiting === true,
+			isInProgress: record.isInProgress === true,
+			isCompleted: record.isCompleted === true,
+			uiDisplayStateType: typeof uiState?.type === "number" ? uiState.type : null
+		};
+	}
+	async function fetchPlannedSubjects(termId) {
+		const resolvedTermId = termId ?? resolveTermId();
+		if (!resolvedTermId) return {
+			ok: false,
+			failure: "no-term",
+			status: null,
+			subjects: []
+		};
+		const { envelope, failure, status } = await getJson(PLANNED_SUBJECTS_ENDPOINT, {
+			"request.termId": resolvedTermId,
+			"request.withRegisteredSubjects": "true"
+		});
+		if (failure) return {
+			ok: false,
+			failure,
+			status,
+			subjects: []
+		};
+		if (!Array.isArray(envelope?.data)) return {
+			ok: false,
+			failure: "malformed",
+			status,
+			subjects: []
+		};
+		return {
+			ok: true,
+			failure: null,
+			status,
+			subjects: envelope.data.map(toPlannedSubject).filter((subject) => subject !== null)
+		};
+	}
+	async function fetchWarningModalStates() {
+		if (!isPlannerApiUsable()) return {
+			scheduledCoursesInTimetableSuppressed: null,
+			oneSubjectCanBeTakenSuppressed: null
+		};
+		const { envelope } = await getJson(WARNING_MODAL_STATES_ENDPOINT, {});
+		const data = asRecord(envelope?.data);
+		return {
+			scheduledCoursesInTimetableSuppressed: typeof data?.scheduledCoursesInTimetableDontAppearAgain === "boolean" ? data.scheduledCoursesInTimetableDontAppearAgain : null,
+			oneSubjectCanBeTakenSuppressed: typeof data?.oneSubjectCanBeTakenDontAppearAgain === "boolean" ? data.oneSubjectCanBeTakenDontAppearAgain : null
+		};
+	}
 	var PLANNER_ROOT_SELECTOR = "neptun-timetable-planner";
 	var PLANNER_LIST_SELECTOR = "neptun-timetable-planner-list-view";
 	var PLANNER_TOGGLE_SELECTOR = "button.timetable-planner__toggle-button";
 	var PLANNER_VIEW_SELECT_ID = "timetable-planner-view-typeSelect";
+	var PLANNER_SUBJECT_CONTAINER_ID_PREFIX = "signed-and-scheduled-subjects";
 	function normalizeText$1(text) {
 		return text.normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
 	}
@@ -2720,44 +2929,41 @@ mat-expansion-panel {
 	}
 	function isPlannerExplicitlyEmpty(root) {
 		const text = normalizeText$1(root.textContent ?? "");
+		if (!text) return false;
 		return [
 			"nincs megjelenitheto adat",
-			"nincs tervezőhoz adott targy",
-			"nincs tervezőhöz adott tárgy",
+			"nincs tervezohoz adott targy",
 			"no planned subjects",
 			"no data to display"
-		].some((message) => text.includes(normalizeText$1(message)));
+		].some((message) => text.includes(message));
 	}
-	async function waitForValue(read, timeoutMs = PLANNER_TIMING.interactiveReadinessTimeoutMs) {
-		const startedAt = Date.now();
-		let value = read();
-		while (value === null && Date.now() - startedAt < timeoutMs) {
-			await delay(PLANNER_TIMING.domPollIntervalMs);
-			value = read();
-		}
-		return value;
+	function getPlannerRoot() {
+		return document.querySelector(PLANNER_ROOT_SELECTOR);
+	}
+	function isInPlannerScope(element) {
+		return element.closest(`${PLANNER_ROOT_SELECTOR}, ${PLANNER_LIST_SELECTOR}`) !== null;
 	}
 	function getPlannerListRoot() {
 		return Array.from(document.querySelectorAll(PLANNER_LIST_SELECTOR)).find((root) => isElementAvailable(root)) ?? null;
 	}
-	function getPlannerRoot() {
-		return document.querySelector(PLANNER_ROOT_SELECTOR);
+	function getPlannerSubjectPanels(root) {
+		const scoped = Array.from(root.querySelectorAll("neptun-subject-list-item mat-expansion-panel"));
+		return (scoped.length > 0 ? scoped : Array.from(root.querySelectorAll("mat-expansion-panel"))).filter(isPlannerSubjectPanel);
+	}
+	function isPlannerSubjectPanel(panel) {
+		if (!isInPlannerScope(panel)) return false;
+		const id = panel.closest("[id]")?.id ?? "";
+		if (!id) return true;
+		return !id.startsWith("subject-registration") || id.startsWith(PLANNER_SUBJECT_CONTAINER_ID_PREFIX);
 	}
 	function isPlannerToggleText(text) {
 		const normalized = normalizeText$1(text);
 		return normalized.includes("orarendtervezo") || normalized.includes("timetable planner");
 	}
 	function findPlannerToggle() {
-		const availableExactMatch = Array.from(document.querySelectorAll(PLANNER_TOGGLE_SELECTOR)).find((button) => isElementAvailable(button));
-		if (availableExactMatch) return availableExactMatch;
+		const availableExact = Array.from(document.querySelectorAll(PLANNER_TOGGLE_SELECTOR)).find((button) => isElementAvailable(button));
+		if (availableExact) return availableExact;
 		return Array.from(document.querySelectorAll("button")).find((button) => isElementAvailable(button) && isPlannerToggleText(`${button.getAttribute("aria-label") ?? ""} ${button.textContent ?? ""}`)) ?? null;
-	}
-	function getPlannerToggleAction(button) {
-		const label = normalizeText$1(`${button.getAttribute("aria-label") ?? ""} ${button.textContent ?? ""}`);
-		if (label.includes("megnyit") || label.includes("open")) return "open";
-		if (label.includes("bezar") || label.includes("close")) return "close";
-		if (isPlannerToggleText(label)) return getPlannerListRoot() || findPlannerViewControl() ? "close" : "open";
-		return "unknown";
 	}
 	function findPlannerViewControl() {
 		const exact = document.getElementById(PLANNER_VIEW_SELECT_ID);
@@ -2772,146 +2978,109 @@ mat-expansion-panel {
 	function findListViewOption() {
 		return Array.from(document.querySelectorAll("mat-option, [role=\"option\"]")).find((option) => isElementAvailable(option) && isListViewText(option.textContent ?? "")) ?? null;
 	}
-	function findSafePlannerEntryPoint() {
-		const list = getPlannerListRoot();
-		if (list) return {
-			type: "list",
-			element: list
-		};
-		const view = findPlannerViewControl();
-		if (view) return {
-			type: "view",
-			element: view
-		};
+	function readPlannerOpenState() {
+		if (getPlannerListRoot() || findPlannerViewControl()) return "open";
 		const toggle = findPlannerToggle();
-		if (toggle && getPlannerToggleAction(toggle) !== "unknown") return {
-			type: "toggle",
-			element: toggle
-		};
-		return null;
+		if (!toggle) return "unknown";
+		const label = normalizeText$1(`${toggle.getAttribute("aria-label") ?? ""} ${toggle.textContent ?? ""}`);
+		if (label.includes("megnyit") || label.includes("open")) return "closed";
+		if (label.includes("bezar") || label.includes("close")) return "open";
+		if (isPlannerToggleText(label)) return "closed";
+		return "unknown";
 	}
-	function finishPreparation(diagnostics, result) {
+	var ControlActionGate = class {
+		lastActionAt = new Map();
+		attempts = new Map();
+		canAct(key, cooldownMs) {
+			if (this.attemptsFor(key) >= PLANNER_TIMING.controlActionMaxAttempts) return false;
+			const last = this.lastActionAt.get(key);
+			return last === void 0 || Date.now() - last >= cooldownMs;
+		}
+		record(key) {
+			this.lastActionAt.set(key, Date.now());
+			this.attempts.set(key, this.attemptsFor(key) + 1);
+		}
+		attemptsFor(key) {
+			return this.attempts.get(key) ?? 0;
+		}
+	};
+	async function acquirePlannerListView(deadline, diagnostics) {
+		const gate = new ControlActionGate();
+		let openedPlanner = false;
+		let switchedToList = false;
+		let lastState = "";
+		while (Date.now() < deadline) {
+			const listRoot = getPlannerListRoot();
+			if (listRoot) return {
+				root: listRoot,
+				openedPlanner,
+				switchedToList,
+				error: null
+			};
+			const openState = readPlannerOpenState();
+			const viewControl = findPlannerViewControl();
+			const state = `${openState}|${viewControl ? "view" : "no-view"}`;
+			if (state !== lastState) {
+				lastState = state;
+				diagnostics.log("acquire:state", {
+					open: openState,
+					viewControl: viewControl !== null,
+					toggleAttempts: gate.attemptsFor("toggle"),
+					viewAttempts: gate.attemptsFor("view")
+				});
+			}
+			if (openState === "closed") {
+				const toggle = findPlannerToggle();
+				if (toggle && gate.canAct("toggle", PLANNER_TIMING.controlActionSettleMs)) {
+					diagnostics.log("acquire:toggle-click", { attempt: gate.attemptsFor("toggle") + 1 });
+					toggle.click();
+					gate.record("toggle");
+					openedPlanner = true;
+				}
+				await delay(PLANNER_TIMING.domPollIntervalMs);
+				continue;
+			}
+			if (viewControl && !isListViewText(viewControl.textContent ?? "")) {
+				const listOption = findListViewOption();
+				if (listOption) {
+					diagnostics.log("acquire:list-option-click");
+					listOption.click();
+					gate.record("view");
+					switchedToList = true;
+				} else if (gate.canAct("view", PLANNER_TIMING.controlActionCooldownMs)) {
+					diagnostics.log("acquire:view-selector-click", { attempt: gate.attemptsFor("view") + 1 });
+					getViewClickTarget(viewControl).click();
+					gate.record("view");
+				}
+			}
+			await delay(PLANNER_TIMING.domPollIntervalMs);
+		}
+		return {
+			root: null,
+			openedPlanner,
+			switchedToList,
+			error: describeAcquisitionFailure(readPlannerOpenState(), gate)
+		};
+	}
+	function describeAcquisitionFailure(state, gate) {
+		if (state === "unknown") return "Neptun timetable planner toggle action could not be identified safely";
+		if (state === "closed") return gate.attemptsFor("toggle") > 0 ? `Neptun timetable planner did not stay open after ${gate.attemptsFor("toggle")} attempts` : "Neptun timetable planner did not open in time";
+		return "Neptun timetable planner list did not render in time";
+	}
+	async function preparePlannerListView(options = {}) {
+		const diagnostics = options.diagnostics ?? createPlannerDiagnostics(options.operation ?? "prepare");
+		const timeoutMs = options.entryPointTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs;
+		diagnostics.log("prepare:start", {
+			readinessTimeoutMs: timeoutMs,
+			pollIntervalMs: PLANNER_TIMING.domPollIntervalMs
+		});
+		const result = await acquirePlannerListView(Date.now() + timeoutMs, diagnostics);
 		diagnostics.log(result.root ? "prepare:ready" : "prepare:failed", {
 			openedPlanner: result.openedPlanner,
 			switchedToList: result.switchedToList,
 			failure: result.error
 		});
 		return result;
-	}
-	async function preparePlannerListView(options = {}) {
-		const diagnostics = options.diagnostics ?? createPlannerDiagnostics(options.operation ?? "prepare");
-		const entryPointTimeoutMs = options.entryPointTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs;
-		diagnostics.log("prepare:start", {
-			readinessTimeoutMs: entryPointTimeoutMs,
-			pollIntervalMs: PLANNER_TIMING.domPollIntervalMs
-		});
-		const existingList = getPlannerListRoot();
-		if (existingList) return finishPreparation(diagnostics, {
-			root: existingList,
-			openedPlanner: false,
-			switchedToList: false,
-			error: null
-		});
-		let openedPlanner = false;
-		diagnostics.log("entry-point:waiting", { timeoutMs: entryPointTimeoutMs });
-		const entryPoint = await waitForValue(findSafePlannerEntryPoint, entryPointTimeoutMs);
-		if (!entryPoint) {
-			const unidentifiedToggle = findPlannerToggle();
-			return finishPreparation(diagnostics, {
-				root: null,
-				openedPlanner,
-				switchedToList: false,
-				error: unidentifiedToggle ? "Neptun timetable planner toggle appeared, but its action could not be identified safely" : `Neptun timetable planner controls did not appear within ${Math.ceil(entryPointTimeoutMs / 1e3)} seconds`
-			});
-		}
-		diagnostics.log("entry-point:ready", { type: entryPoint.type });
-		if (entryPoint.type === "list") return finishPreparation(diagnostics, {
-			root: entryPoint.element,
-			openedPlanner: false,
-			switchedToList: false,
-			error: null
-		});
-		let viewControl = entryPoint.type === "view" ? entryPoint.element : findPlannerViewControl();
-		if (!viewControl) {
-			const toggle = entryPoint.type === "toggle" && entryPoint.element.isConnected ? entryPoint.element : findPlannerToggle();
-			if (!toggle) return finishPreparation(diagnostics, {
-				root: null,
-				openedPlanner,
-				switchedToList: false,
-				error: "Neptun timetable planner toggle was not found"
-			});
-			const action = getPlannerToggleAction(toggle);
-			if (action !== "open") return finishPreparation(diagnostics, {
-				root: null,
-				openedPlanner,
-				switchedToList: false,
-				error: action === "close" ? "Neptun timetable planner is open but its view selector is not ready" : "Neptun timetable planner toggle action could not be identified safely"
-			});
-			diagnostics.log("planner-toggle:click", { action });
-			toggle.click();
-			openedPlanner = true;
-			diagnostics.log("planner-open:waiting", { timeoutMs: entryPointTimeoutMs });
-			const plannerReady = await waitForValue(() => {
-				const list = getPlannerListRoot();
-				if (list) return {
-					list,
-					viewControl: null
-				};
-				const control = findPlannerViewControl();
-				return control ? {
-					list: null,
-					viewControl: control
-				} : null;
-			}, entryPointTimeoutMs);
-			if (plannerReady?.list) return finishPreparation(diagnostics, {
-				root: plannerReady.list,
-				openedPlanner,
-				switchedToList: false,
-				error: null
-			});
-			viewControl = plannerReady?.viewControl ?? null;
-			if (!viewControl) return finishPreparation(diagnostics, {
-				root: null,
-				openedPlanner,
-				switchedToList: false,
-				error: "Neptun timetable planner did not finish opening"
-			});
-		}
-		if (isListViewText(viewControl.textContent ?? "")) {
-			diagnostics.log("list-view:waiting", { timeoutMs: entryPointTimeoutMs });
-			const listRoot = await waitForValue(getPlannerListRoot, entryPointTimeoutMs);
-			return finishPreparation(diagnostics, {
-				root: listRoot,
-				openedPlanner,
-				switchedToList: false,
-				error: listRoot ? null : "Neptun timetable planner list did not render"
-			});
-		}
-		diagnostics.log("view-selector:click");
-		getViewClickTarget(viewControl).click();
-		diagnostics.log("list-option:waiting", { timeoutMs: entryPointTimeoutMs });
-		const listOption = await waitForValue(findListViewOption, entryPointTimeoutMs);
-		if (!listOption) return finishPreparation(diagnostics, {
-			root: null,
-			openedPlanner,
-			switchedToList: false,
-			error: "Neptun timetable planner list-view option was not found"
-		});
-		diagnostics.log("list-option:click");
-		listOption.click();
-		diagnostics.log("list-view:waiting", { timeoutMs: entryPointTimeoutMs });
-		const listRoot = await waitForValue(getPlannerListRoot, entryPointTimeoutMs);
-		return finishPreparation(diagnostics, {
-			root: listRoot,
-			openedPlanner,
-			switchedToList: true,
-			error: listRoot ? null : "Neptun timetable planner list did not render"
-		});
-	}
-	function getPlannerSubjectPanels(root = getPlannerListRoot() ?? document) {
-		const scopedPanels = Array.from(root.querySelectorAll("neptun-subject-list-item mat-expansion-panel"));
-		if (scopedPanels.length > 0) return scopedPanels;
-		return Array.from(root.querySelectorAll("mat-expansion-panel"));
 	}
 	function findEnrollmentButton$1(panel) {
 		return Array.from(panel.querySelectorAll("button")).find((button) => isEnrollButtonText(button.textContent ?? "")) ?? null;
@@ -2946,67 +3115,100 @@ mat-expansion-panel {
 		}
 		return readExpandedPlannerSubject(subjectCode, panel);
 	}
-	function finishSnapshot(diagnostics, snapshot) {
-		diagnostics.log("snapshot:complete", {
-			contentReady: snapshot.contentReady,
-			listedSubjects: snapshot.listedSubjects,
-			readableSubjects: snapshot.subjects.length,
-			issueCount: snapshot.issues.length
-		});
-		return snapshot;
+	async function waitForStableSubjectList(root, deadline, apiPlannedCount, diagnostics) {
+		let lastSignature = "";
+		let stableSince = Date.now();
+		while (Date.now() < deadline) {
+			const panels = getPlannerSubjectPanels(root);
+			const codes = panels.map((panel) => extractSubjectCode(panel));
+			if (panels.length > 0 && codes.every((code) => code !== null)) {
+				const matchesApi = apiPlannedCount === null || panels.length >= apiPlannedCount;
+				const signature = codes.join("|");
+				if (matchesApi && signature === lastSignature) {
+					if (Date.now() - stableSince >= PLANNER_TIMING.listStabilityWindowMs) return {
+						panels,
+						explicitlyEmpty: false
+					};
+				} else {
+					lastSignature = signature;
+					stableSince = Date.now();
+				}
+			}
+			if (apiPlannedCount === 0) {
+				diagnostics.log("subject-list:empty-confirmed-by-api");
+				return {
+					panels: [],
+					explicitlyEmpty: true
+				};
+			}
+			if (panels.length === 0 && isPlannerExplicitlyEmpty(root)) {
+				diagnostics.log("subject-list:empty-state-rendered");
+				return {
+					panels: [],
+					explicitlyEmpty: true
+				};
+			}
+			await delay(PLANNER_TIMING.domPollIntervalMs);
+		}
+		return {
+			panels: getPlannerSubjectPanels(root),
+			explicitlyEmpty: false
+		};
 	}
 	async function collectPlannerSnapshot(options = {}) {
 		const diagnostics = options.diagnostics ?? createPlannerDiagnostics(options.operation ?? "prepare");
+		const contentTimeoutMs = options.contentTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs;
+		const apiPromise = fetchPlannedSubjects().catch(() => null);
 		const preparation = await preparePlannerListView({
 			...options,
 			diagnostics
 		});
-		if (!preparation.root) return finishSnapshot(diagnostics, {
+		const apiResult = await apiPromise;
+		const plannedFromApi = apiResult?.ok ? apiResult.subjects : null;
+		const apiPlannedCount = plannedFromApi?.length ?? null;
+		diagnostics.log("api:planned-subjects", {
+			ok: apiResult?.ok ?? false,
+			failure: apiResult?.failure ?? "unavailable",
+			count: apiPlannedCount
+		});
+		if (!preparation.root) return {
 			diagnosticRunId: diagnostics.runId,
 			preparation,
 			contentReady: false,
 			listedSubjects: 0,
 			subjects: [],
+			plannedFromApi,
 			issues: [preparation.error ?? "Neptun timetable planner list is unavailable"]
-		});
+		};
 		const issues = [];
 		const subjects = [];
-		const contentTimeoutMs = options.contentTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs;
+		const contentDeadline = Date.now() + contentTimeoutMs;
 		diagnostics.log("subject-list:waiting", {
 			timeoutMs: contentTimeoutMs,
-			stabilityWindowMs: PLANNER_TIMING.listStabilityWindowMs
+			stabilityWindowMs: PLANNER_TIMING.listStabilityWindowMs,
+			expectedFromApi: apiPlannedCount
 		});
-		let lastSignature = "";
-		let stableSince = 0;
-		const startedWaitingAt = Date.now();
-		while (Date.now() - startedWaitingAt < contentTimeoutMs) {
-			const panels = getPlannerSubjectPanels(preparation.root);
-			const codes = panels.map((panel) => extractSubjectCode(panel));
-			const signature = panels.length > 0 && codes.every((code) => code !== null) ? codes.join("|") : "";
-			if (signature && signature === lastSignature) {
-				if (Date.now() - stableSince >= PLANNER_TIMING.listStabilityWindowMs) break;
-			} else {
-				lastSignature = signature;
-				stableSince = Date.now();
-			}
-			if (isPlannerExplicitlyEmpty(preparation.root)) break;
-			await delay(PLANNER_TIMING.domPollIntervalMs);
-		}
-		const plannerPanels = getPlannerSubjectPanels(preparation.root);
+		const { panels: plannerPanels, explicitlyEmpty } = await waitForStableSubjectList(preparation.root, contentDeadline, apiPlannedCount, diagnostics);
 		const subjectEntries = plannerPanels.map((panel) => ({
 			panel,
 			subjectCode: extractSubjectCode(panel)
 		})).filter((entry) => entry.subjectCode !== null);
 		if (subjectEntries.length === 0) {
-			const explicitlyEmpty = isPlannerExplicitlyEmpty(preparation.root);
-			return finishSnapshot(diagnostics, {
+			diagnostics.log("snapshot:complete", {
+				contentReady: explicitlyEmpty,
+				listedSubjects: plannerPanels.length,
+				readableSubjects: 0,
+				issueCount: 1
+			});
+			return {
 				diagnosticRunId: diagnostics.runId,
 				preparation,
 				contentReady: explicitlyEmpty,
 				listedSubjects: plannerPanels.length,
 				subjects,
+				plannedFromApi,
 				issues: [explicitlyEmpty ? "No planned subjects are visible in Neptun timetable planner list view" : plannerPanels.length === 0 ? "Neptun timetable planner subjects did not finish loading" : "Planner subjects are visible, but their subject codes could not be read safely"]
-			});
+			};
 		}
 		diagnostics.log("subject-list:ready", {
 			panelCount: plannerPanels.length,
@@ -3031,7 +3233,6 @@ mat-expansion-panel {
 			expandedCount: expandedEntries.length,
 			failedCount: subjectEntries.length - expandedEntries.length
 		});
-		const contentDeadline = Date.now() + contentTimeoutMs;
 		diagnostics.log("course-rows:waiting", { timeoutMs: contentTimeoutMs });
 		while (Date.now() < contentDeadline && expandedEntries.some(({ panel }) => getCourseItems(panel).length === 0)) await delay(PLANNER_TIMING.domPollIntervalMs);
 		for (const { subjectCode, panel } of expandedEntries) {
@@ -3047,18 +3248,26 @@ mat-expansion-panel {
 			subjects.push(liveTarget);
 			if (liveTarget.issue) issues.push(liveTarget.issue);
 		}
-		return finishSnapshot(diagnostics, {
+		diagnostics.log("snapshot:complete", {
+			contentReady: true,
+			listedSubjects: plannerPanels.length,
+			readableSubjects: subjects.length,
+			issueCount: issues.length
+		});
+		return {
 			diagnosticRunId: diagnostics.runId,
 			preparation,
 			contentReady: true,
 			listedSubjects: plannerPanels.length,
 			subjects,
+			plannedFromApi,
 			issues
-		});
+		};
 	}
 	function closePlannerSafely() {
+		if (readPlannerOpenState() !== "open") return false;
 		const toggle = findPlannerToggle();
-		if (!toggle || getPlannerToggleAction(toggle) !== "close") return false;
+		if (!toggle) return false;
 		toggle.click();
 		return true;
 	}
@@ -3075,6 +3284,7 @@ mat-expansion-panel {
 			enrolled: 0,
 			failed: 0,
 			skipped: 0,
+			unconfirmed: 0,
 			aborted: false,
 			errors: error ? [error] : []
 		};
@@ -3087,10 +3297,13 @@ mat-expansion-panel {
 		const normalizedActual = normalizeCodes(actual);
 		return normalizedExpected.length === normalizedActual.length && normalizedExpected.every((code, index) => code === normalizedActual[index]);
 	}
+	function normalizeDialogText(text) {
+		return text.normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
+	}
 	function isEnrollmentConfirmationDialog(dialog) {
-		const text = (dialog.textContent ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
+		const text = normalizeDialogText(dialog.textContent ?? "");
 		if (text.includes("confirm subject registration") || text.includes("biztosan felveszi") || text.includes("targyfelvetel megerositese")) return true;
-		const buttonLabels = Array.from(dialog.querySelectorAll("button")).map((button) => (button.textContent ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim().toLowerCase());
+		const buttonLabels = Array.from(dialog.querySelectorAll("button")).map((button) => normalizeDialogText(button.textContent ?? ""));
 		const hasAccept = buttonLabels.some((label) => [
 			"igen",
 			"yes",
@@ -3108,7 +3321,7 @@ mat-expansion-panel {
 		return Array.from(document.querySelectorAll("[role=\"dialog\"], mat-dialog-container, .mat-mdc-dialog-container")).filter((dialog) => isElementAvailable(dialog) && isEnrollmentConfirmationDialog(dialog));
 	}
 	function getVisibleNotificationState() {
-		return Array.from(document.querySelectorAll(".cdk-overlay-pane, [role=\"status\"], [aria-live=\"polite\"], [aria-live=\"assertive\"]")).filter((element) => isElementAvailable(element) && !isEnrollmentConfirmationDialog(element)).map((element) => (element.textContent ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim().toLowerCase()).filter(Boolean).join("|");
+		return Array.from(document.querySelectorAll(".cdk-overlay-pane, [role=\"status\"], [aria-live=\"polite\"], [aria-live=\"assertive\"]")).filter((element) => isElementAvailable(element) && !isEnrollmentConfirmationDialog(element)).map((element) => normalizeDialogText(element.textContent ?? "")).filter(Boolean).join("|");
 	}
 	function isFailureNotification(text) {
 		return [
@@ -3118,6 +3331,29 @@ mat-expansion-panel {
 			"error",
 			"nincs targyjelentkezesi idoszak"
 		].some((marker) => text.includes(marker));
+	}
+	var RUN_FATAL_NOTIFICATION_MARKERS = [
+		"nincs targyjelentkezesi idoszak",
+		"no subject registration period",
+		"lejart a targyjelentkezesi idoszak"
+	];
+	function isRunFatalNotification(text) {
+		return RUN_FATAL_NOTIFICATION_MARKERS.some((marker) => text.includes(marker));
+	}
+	async function waitForNewNotification(notificationStateBeforeClick, timeoutMs = PLANNER_TIMING.notificationSettleMs) {
+		const startedAt = Date.now();
+		while (Date.now() - startedAt < timeoutMs) {
+			const current = getVisibleNotificationState();
+			if (current && current !== notificationStateBeforeClick) return current;
+			await delay(PLANNER_TIMING.outcomePollIntervalMs);
+		}
+		return getVisibleNotificationState();
+	}
+	function classifyFailure(status, notification) {
+		if (isRunFatalNotification(notification)) return "run-fatal";
+		if (isFailureNotification(notification)) return "rejected";
+		if (status === 429 || status === 502 || status === 503 || status === 504) return "retryable";
+		return "rejected";
 	}
 	function getEnrollmentRequests() {
 		try {
@@ -3148,10 +3384,9 @@ mat-expansion-panel {
 		if (!root) return false;
 		return getPlannerSubjectPanels(root).filter((panel) => extractSubjectCode(panel) === subjectCode).some((panel) => Array.from(panel.querySelectorAll("button")).some((button) => isEnrollButtonText(button.textContent ?? "") && isElementAvailable(button)));
 	}
-	async function waitForPlannerUiOutcome(subjectCode, previousButton, notificationStateBeforeClick, timeoutMs = PLANNER_TIMING.enrollmentUiUpdateTimeoutMs) {
+	async function waitForPlannerUiOutcome(subjectCode, notificationStateBeforeClick, timeoutMs = PLANNER_TIMING.enrollmentUiUpdateTimeoutMs) {
 		const startedAt = Date.now();
 		while (Date.now() - startedAt < timeoutMs) {
-			if (!previousButton.isConnected && !hasVisibleEnrollmentAction(subjectCode)) return "updated";
 			if (!hasVisibleEnrollmentAction(subjectCode)) return "updated";
 			const notificationState = getVisibleNotificationState();
 			if (notificationState !== notificationStateBeforeClick && isFailureNotification(notificationState)) return "failure-notification";
@@ -3159,10 +3394,129 @@ mat-expansion-panel {
 		}
 		return "timeout";
 	}
+	async function confirmEnrollment(subjectCode, apiUsable, notificationStateBeforeClick, diagnostics) {
+		if (apiUsable) {
+			await delay(PLANNER_TIMING.apiConfirmationDelayMs);
+			const refreshed = await fetchPlannedSubjects().catch(() => null);
+			if (refreshed?.ok) {
+				const match = refreshed.subjects.find((subject) => subject.code === subjectCode);
+				diagnostics.log("confirm:api", {
+					found: match !== void 0,
+					isRegistered: match?.isRegistered ?? null
+				});
+				if (!match) return "registered";
+				return match.isRegistered ? "registered" : "rejected";
+			}
+			diagnostics.log("confirm:api-unavailable", { failure: refreshed?.failure ?? "error" });
+		}
+		const uiOutcome = await waitForPlannerUiOutcome(subjectCode, notificationStateBeforeClick);
+		diagnostics.log("confirm:ui", { outcome: uiOutcome });
+		if (uiOutcome === "updated") return "registered";
+		if (uiOutcome === "failure-notification") return "rejected";
+		return "unknown";
+	}
 	function validateTarget(target) {
 		const liveTarget = readPlannerSubjectTarget(target.subjectCode, target.panel);
 		if (!liveTarget || !liveTarget.available || !liveTarget.enrollmentButton || !courseSelectionMatches(target.courseCodes, liveTarget.courseCodes)) return null;
 		return liveTarget;
+	}
+	async function enrollSingleSubject(target, apiUsable, diagnostics, targetIndex) {
+		let lastError = `${target.subjectCode}: enrollment did not complete`;
+		for (let attempt = 1; attempt <= PLANNER_TIMING.enrollmentMaxAttempts; attempt++) {
+			const liveTarget = validateTarget(target);
+			if (!liveTarget?.enrollmentButton) {
+				if (attempt > 1) {
+					if (await confirmEnrollment(target.subjectCode, apiUsable, "", diagnostics) === "registered") return {
+						outcome: "enrolled",
+						error: null
+					};
+					return {
+						outcome: "failed",
+						error: lastError
+					};
+				}
+				return {
+					outcome: "selection-changed",
+					error: `${target.subjectCode}: planner selection changed before enrollment`
+				};
+			}
+			const dialogsBeforeClick = new Set(getVisibleDialogs());
+			const notificationStateBeforeClick = getVisibleNotificationState();
+			const requestsBeforeClick = getEnrollmentRequests().length;
+			diagnostics.log("target:click", {
+				targetIndex,
+				attempt,
+				priorRequestCount: requestsBeforeClick
+			});
+			liveTarget.enrollmentButton.click();
+			const outcome = await waitForEnrollmentOutcome(requestsBeforeClick, dialogsBeforeClick);
+			diagnostics.log("target:request-outcome", {
+				targetIndex,
+				attempt,
+				outcome: outcome.type,
+				status: outcome.type === "request" ? outcome.status : null
+			});
+			if (outcome.type === "confirmation-required") return {
+				outcome: "aborted",
+				error: `${target.subjectCode}: Neptun registration confirmation popup is enabled`
+			};
+			if (outcome.type === "timeout") {
+				const confirmation = await confirmEnrollment(target.subjectCode, apiUsable, notificationStateBeforeClick, diagnostics);
+				if (confirmation === "registered") return {
+					outcome: "enrolled",
+					error: null
+				};
+				return {
+					outcome: confirmation === "rejected" ? "failed" : "unconfirmed",
+					error: `${target.subjectCode}: timed out waiting for Neptun`
+				};
+			}
+			if (outcome.status !== null && outcome.status >= 400) {
+				const notification = await waitForNewNotification(notificationStateBeforeClick);
+				const classification = classifyFailure(outcome.status, notification);
+				diagnostics.log("target:failure-classified", {
+					targetIndex,
+					attempt,
+					status: outcome.status,
+					classification
+				});
+				lastError = `${target.subjectCode}: server returned ${outcome.status}`;
+				if (classification === "run-fatal") return {
+					outcome: "run-fatal",
+					error: `${target.subjectCode}: Neptun reports there is no open registration period`
+				};
+				if (classification === "rejected") return {
+					outcome: "failed",
+					error: lastError
+				};
+				if (attempt < PLANNER_TIMING.enrollmentMaxAttempts) {
+					diagnostics.log("target:retry", {
+						targetIndex,
+						attempt,
+						status: outcome.status
+					});
+					await delay(PLANNER_TIMING.enrollmentRetryBaseDelayMs * attempt);
+				}
+				continue;
+			}
+			const confirmation = await confirmEnrollment(target.subjectCode, apiUsable, notificationStateBeforeClick, diagnostics);
+			if (confirmation === "registered") return {
+				outcome: "enrolled",
+				error: null
+			};
+			if (confirmation === "rejected") return {
+				outcome: "failed",
+				error: `${target.subjectCode}: Neptun reported enrollment failure`
+			};
+			return {
+				outcome: "unconfirmed",
+				error: `${target.subjectCode}: request completed but enrollment could not be confirmed`
+			};
+		}
+		return {
+			outcome: "failed",
+			error: lastError
+		};
 	}
 	async function runPlannerEnrollment(options) {
 		const api = getApi$1();
@@ -3171,7 +3525,7 @@ mat-expansion-panel {
 		diagnostics.log("enroll:start", {
 			readinessTimeoutMs,
 			requestTimeoutMs: PLANNER_TIMING.enrollmentRequestTimeoutMs,
-			uiUpdateTimeoutMs: PLANNER_TIMING.enrollmentUiUpdateTimeoutMs
+			maxAttemptsPerSubject: PLANNER_TIMING.enrollmentMaxAttempts
 		});
 		const snapshot = await collectPlannerSnapshot({
 			entryPointTimeoutMs: readinessTimeoutMs,
@@ -3179,7 +3533,9 @@ mat-expansion-panel {
 			diagnostics,
 			operation: "enroll"
 		});
-		const eligibleTargets = snapshot.subjects.filter((subject) => subject.available && subject.enrollmentButton);
+		const apiUsable = snapshot.plannedFromApi !== null;
+		const registeredCodes = new Set((snapshot.plannedFromApi ?? []).filter((subject) => subject.isRegistered).map((subject) => subject.code));
+		const eligibleTargets = snapshot.subjects.filter((subject) => subject.available && subject.enrollmentButton && !registeredCodes.has(subject.subjectCode));
 		const result = {
 			plannerReady: snapshot.preparation.root !== null && snapshot.contentReady,
 			openedPlanner: snapshot.preparation.openedPlanner,
@@ -3190,6 +3546,7 @@ mat-expansion-panel {
 			enrolled: 0,
 			failed: 0,
 			skipped: snapshot.subjects.length - eligibleTargets.length,
+			unconfirmed: 0,
 			aborted: false,
 			errors: [...snapshot.issues]
 		};
@@ -3197,7 +3554,9 @@ mat-expansion-panel {
 			listedSubjects: result.listedSubjects,
 			readableSubjects: result.plannedSubjects,
 			eligibleSubjects: result.eligibleSubjects,
-			skippedSubjects: result.skipped
+			skippedSubjects: result.skipped,
+			alreadyRegistered: registeredCodes.size,
+			apiUsable
 		});
 		if (!snapshot.preparation.root || !snapshot.contentReady) {
 			diagnostics.log("enroll:blocked", { reason: "planner-not-ready" });
@@ -3206,7 +3565,7 @@ mat-expansion-panel {
 		}
 		if (eligibleTargets.length === 0) {
 			diagnostics.log("enroll:blocked", { reason: "no-eligible-targets" });
-			api?.statusPanel.addMessage("warn", `No enrollable planned subjects were found. Preview the planner and review unavailable items. Console run: ${diagnostics.runId}.`);
+			api?.statusPanel.addMessage("warn", registeredCodes.size > 0 && registeredCodes.size === snapshot.subjects.length ? `All ${registeredCodes.size} planned subjects are already registered. Nothing was clicked.` : `No enrollable planned subjects were found. Preview the planner and review unavailable items. Console run: ${diagnostics.runId}.`);
 			return result;
 		}
 		try {
@@ -3220,11 +3579,14 @@ mat-expansion-panel {
 		} catch (error) {
 			api?.logger.warn("cannot check sessionStorage before planner enrollment:", error);
 		}
+		if ((await fetchWarningModalStates().catch(() => null))?.scheduledCoursesInTimetableSuppressed === false) {
+			diagnostics.log("enroll:warning-modal-active");
+			api?.statusPanel.addMessage("warn", "Neptun’s registration confirmation popup is still enabled. If it appears, the run stops safely — tick “do not show again” in Neptun to avoid that.");
+		}
 		api?.statusPanel.expand();
 		api?.statusPanel.addMessage("info", `Enrolling ${eligibleTargets.length} planned subject${eligibleTargets.length === 1 ? "" : "s"} sequentially...`);
 		for (const [targetIndex, target] of eligibleTargets.entries()) {
-			const liveTarget = validateTarget(target);
-			if (!liveTarget?.enrollmentButton) {
+			if (!validateTarget(target)?.enrollmentButton) {
 				result.failed++;
 				result.errors.push(`${target.subjectCode}: planner selection changed before enrollment`);
 				diagnostics.log("target:skipped", {
@@ -3235,66 +3597,41 @@ mat-expansion-panel {
 			}
 			result.attempted++;
 			api?.statusPanel.addMessage("info", `Enrolling ${target.subjectCode}... (${result.attempted}/${eligibleTargets.length})`);
-			const dialogsBeforeClick = new Set(getVisibleDialogs());
-			const notificationStateBeforeClick = getVisibleNotificationState();
-			const requestsBeforeClick = getEnrollmentRequests().length;
-			const enrollmentButton = liveTarget.enrollmentButton;
-			diagnostics.log("target:click", {
-				targetIndex,
-				targetCount: eligibleTargets.length,
-				priorRequestCount: requestsBeforeClick
-			});
-			enrollmentButton.click();
-			const outcome = await waitForEnrollmentOutcome(requestsBeforeClick, dialogsBeforeClick);
-			diagnostics.log("target:request-outcome", {
-				targetIndex,
-				outcome: outcome.type,
-				status: outcome.type === "request" ? outcome.status : null
-			});
-			if (outcome.type === "confirmation-required") {
+			const attemptResult = await enrollSingleSubject(target, apiUsable, diagnostics, targetIndex);
+			if (attemptResult.error) result.errors.push(attemptResult.error);
+			if (attemptResult.outcome === "enrolled") {
+				result.enrolled++;
+				continue;
+			}
+			if (attemptResult.outcome === "unconfirmed") {
+				result.unconfirmed++;
+				continue;
+			}
+			if (attemptResult.outcome === "run-fatal") {
 				result.failed++;
 				result.aborted = true;
-				result.errors.push(`${target.subjectCode}: Neptun registration confirmation popup is enabled`);
+				api?.statusPanel.addMessage("error", `Neptun reports there is no open course registration period. Stopped after the first subject; the remaining ${eligibleTargets.length - result.attempted} were not clicked. Console run: ${diagnostics.runId}.`);
+				break;
+			}
+			if (attemptResult.outcome === "aborted") {
+				result.failed++;
+				result.aborted = true;
 				api?.statusPanel.addMessage("error", `Neptun opened a registration confirmation. Complete or cancel it manually, enable “do not show again,” then retry. Remaining subjects were not clicked. Console run: ${diagnostics.runId}.`);
 				break;
 			}
-			if (outcome.type === "timeout") {
-				result.failed++;
-				result.errors.push(`${target.subjectCode}: timed out waiting for Neptun`);
-				continue;
-			}
-			if (outcome.status !== null && outcome.status >= 400) {
-				result.failed++;
-				result.errors.push(`${target.subjectCode}: server returned ${outcome.status}`);
-				continue;
-			}
-			const uiOutcome = await waitForPlannerUiOutcome(target.subjectCode, enrollmentButton, notificationStateBeforeClick);
-			diagnostics.log("target:ui-outcome", {
-				targetIndex,
-				outcome: uiOutcome
-			});
-			if (uiOutcome === "failure-notification") {
-				result.failed++;
-				result.errors.push(`${target.subjectCode}: Neptun reported enrollment failure`);
-				continue;
-			}
-			if (uiOutcome === "timeout") {
-				result.failed++;
-				result.errors.push(`${target.subjectCode}: request completed but planner did not confirm enrollment`);
-				continue;
-			}
-			result.enrolled++;
+			result.failed++;
 		}
-		const summary = `Planner enrollment: ${result.enrolled} enrolled, ${result.failed} failed, ${result.skipped} skipped.${result.aborted ? " Stopped safely." : ""}`;
+		const summary = `Planner enrollment: ${result.enrolled} enrolled, ${result.failed} failed, ${result.unconfirmed} unconfirmed, ${result.skipped} skipped.${result.aborted ? " Stopped safely." : ""}`;
 		const summaryWithRunId = `${summary} Console run: ${diagnostics.runId}.`;
 		diagnostics.log("enroll:complete", {
 			enrolled: result.enrolled,
 			failed: result.failed,
+			unconfirmed: result.unconfirmed,
 			skipped: result.skipped,
 			aborted: result.aborted
 		});
 		api?.logger.info(summary, result);
-		api?.statusPanel.addMessage(result.failed === 0 && !result.aborted ? "info" : "warn", result.errors.length > 0 ? `${summaryWithRunId} ${result.errors.join("; ")}` : summaryWithRunId);
+		api?.statusPanel.addMessage(result.failed === 0 && result.unconfirmed === 0 && !result.aborted ? "info" : "warn", result.errors.length > 0 ? `${summaryWithRunId} ${result.errors.join("; ")}` : summaryWithRunId);
 		return result;
 	}
 	function enrollPlannedCourses(options = {}) {
@@ -3714,7 +4051,7 @@ mat-expansion-panel {
 			}));
 			if (api.statusPanel.getCourseRushMode()) {
 				api.logger.info("Course Rush Mode active - using Neptun timetable planner first");
-				api.statusPanel.setCourseRushMode(false);
+				await api.statusPanel.setCourseRushMode(false);
 				api.statusPanel.addMessage("info", "Course Rush started and turned itself off. Waiting for Neptun timetable planner...");
 				const plannerResult = await enrollPlannedCourses({ plannerWaitTimeoutMs: PLANNER_TIMING.rushReadinessTimeoutMs });
 				if (!plannerResult.plannerReady) api.statusPanel.addMessage("warn", "Neptun timetable planner did not become ready. Local fallback was not started automatically; nothing else was clicked.");
@@ -4398,7 +4735,7 @@ mat-expansion-panel {
 				return;
 			}
 			api?.statusPanel.addMessage("info", `Exam Rush: ${targets.length} saved target${targets.length === 1 ? "" : "s"} visible.`);
-			api?.statusPanel.setExamRushMode(false);
+			await api?.statusPanel.setExamRushMode(false);
 			api?.statusPanel.addMessage("info", "Exam Rush started and turned itself off.");
 			let failedCount = 0;
 			let submittedCount = 0;
@@ -5235,6 +5572,63 @@ mat-expansion-panel {
 			declineBtn.addEventListener("click", () => cleanup(false));
 		});
 	}
+	var RUSH_PATHS = {
+		course: "subjects/registration",
+		exam: "exams/overview/registration"
+	};
+	var REDIRECT_COUNT_KEY = "npu:rushRedirectCount";
+	var MAX_REDIRECTS = 2;
+	function hasAccessToken() {
+		try {
+			return Boolean(sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken));
+		} catch {
+			return false;
+		}
+	}
+	function getPortalPrefix(pathname = window.location.pathname) {
+		return pathname.split("/")[1] || "hallgatoi";
+	}
+	function buildRushUrl(kind, pathname, origin) {
+		return `${origin}/${getPortalPrefix(pathname)}/${RUSH_PATHS[kind]}`;
+	}
+	function isOnRushPage(kind, path) {
+		return path.includes(`/${RUSH_PATHS[kind]}`);
+	}
+	function isOnLoginPage(path) {
+		return path.endsWith("/login") || path === "/login";
+	}
+	function readRedirectCount() {
+		try {
+			const raw = sessionStorage.getItem(REDIRECT_COUNT_KEY);
+			const parsed = raw === null ? 0 : Number.parseInt(raw, 10);
+			return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+		} catch {
+			return 0;
+		}
+	}
+	function noteRedirect() {
+		try {
+			sessionStorage.setItem(REDIRECT_COUNT_KEY, String(readRedirectCount() + 1));
+		} catch {}
+	}
+	function clearRedirectBudget() {
+		try {
+			sessionStorage.removeItem(REDIRECT_COUNT_KEY);
+		} catch {}
+	}
+	function decideRushRedirect(kind, path, authenticated, redirectCount = readRedirectCount(), origin = window.location.origin) {
+		if (isOnRushPage(kind, path)) return { action: "already-there" };
+		if (!authenticated || isOnLoginPage(path)) return { action: "wait-for-login" };
+		if (redirectCount >= MAX_REDIRECTS) return { action: "budget-exhausted" };
+		return {
+			action: "navigate",
+			url: buildRushUrl(kind, path, origin)
+		};
+	}
+	function performRushRedirect(url) {
+		noteRedirect();
+		window.location.href = url;
+	}
 	async function main() {
 		const logger = createLogger("core");
 		if (!isLikelyNeptunPortal()) return;
@@ -5278,13 +5672,21 @@ mat-expansion-panel {
 		const themeInitial = await rushStorage.getForDomain("themeSettings") ?? { ...DEFAULT_THEME };
 		logger.info(`rush mode initial state — course: ${courseRushInitial}, exam: ${examRushInitial}`);
 		const statusPanel = createStatusPanel(bus, {
-			onCourseRushChange: (on) => {
-				rushStorage.set("courseRushMode", on).catch((err) => logger.error("failed to persist courseRushMode:", err));
+			onCourseRushChange: async (on) => {
+				try {
+					await rushStorage.set("courseRushMode", on);
+				} catch (err) {
+					logger.error("failed to persist courseRushMode:", err);
+				}
 				logger.info(`Course Rush Mode ${on ? "ON" : "OFF"}`);
 				statusPanel.addMessage("info", `Course Rush ${on ? "on" : "off"}`);
 			},
-			onExamRushChange: (on) => {
-				rushStorage.set("examRushMode", on).catch((err) => logger.error("failed to persist examRushMode:", err));
+			onExamRushChange: async (on) => {
+				try {
+					await rushStorage.set("examRushMode", on);
+				} catch (err) {
+					logger.error("failed to persist examRushMode:", err);
+				}
 				logger.info(`Exam Rush Mode ${on ? "ON" : "OFF"}`);
 				statusPanel.addMessage("info", `Exam Rush ${on ? "on" : "off"}`);
 			},
@@ -5309,31 +5711,49 @@ mat-expansion-panel {
 		registry.register(examSignupModule);
 		registry.register(pinkModeModule);
 		await registry.activateAll(buildContext());
-		let lastPath = extractPath(window.location.href);
-		observeRouteChanges(bus);
-		bus.on("page:changed", async (payload) => {
-			logger.info(`route changed: ${window.location.pathname}`);
-			const previousPath = lastPath;
-			lastPath = payload.path;
-			if ((previousPath === "/login" || previousPath.endsWith("/login")) && !payload.path.includes("/login")) {
-				const courseRush = statusPanel.getCourseRushMode();
-				const examRush = statusPanel.getExamRushMode();
-				if (courseRush) {
-					logger.info("Course Rush Mode: redirecting to registration page after login");
-					statusPanel.addMessage("info", "Opening course registration for Course Rush...");
-					registry.disposeAll();
-					const pathPrefix = window.location.pathname.split("/")[1] || "hallgatoi";
-					window.location.href = `${window.location.origin}/${pathPrefix}/subjects/registration`;
-					return;
-				} else if (examRush) {
-					logger.info("Exam Rush Mode: redirecting to exam overview after login");
-					statusPanel.addMessage("info", "Opening exam overview for Exam Rush...");
-					registry.disposeAll();
-					const pathPrefix = window.location.pathname.split("/")[1] || "hallgatoi";
-					window.location.href = `${window.location.origin}/${pathPrefix}/exams/overview/registration`;
-					return;
-				}
+		function tryRushRedirect(kind, reason) {
+			const path = extractPath(window.location.href);
+			const decision = decideRushRedirect(kind, path, hasAccessToken());
+			if (decision.action === "already-there") {
+				clearRedirectBudget();
+				return false;
 			}
+			if (decision.action === "budget-exhausted") {
+				logger.warn(`${kind} rush: redirect budget exhausted, staying on ${path}`);
+				statusPanel.addMessage("warn", `Could not reach the ${kind === "course" ? "course registration" : "exam"} page automatically. Open it manually and re-enable the rush.`);
+				return false;
+			}
+			if (decision.action === "wait-for-login") return false;
+			logger.info(`${kind} rush: navigating to rush page (${reason})`);
+			statusPanel.addMessage("info", `Opening ${kind === "course" ? "course registration" : "exam overview"} for ${kind === "course" ? "Course" : "Exam"} Rush...`);
+			registry.disposeAll();
+			performRushRedirect(decision.url);
+			return true;
+		}
+		function armedRushKind() {
+			if (statusPanel.getCourseRushMode()) return "course";
+			if (statusPanel.getExamRushMode()) return "exam";
+			return null;
+		}
+		const initialRush = armedRushKind();
+		if (initialRush) {
+			if (isOnRushPage(initialRush, extractPath(window.location.href))) clearRedirectBudget();
+			else if (!tryRushRedirect(initialRush, "page load")) {
+				const stopWaiting = bus.on("token:acquired", () => {
+					const kind = armedRushKind();
+					if (!kind) {
+						stopWaiting();
+						return;
+					}
+					if (tryRushRedirect(kind, "token acquired")) stopWaiting();
+				});
+			}
+		} else clearRedirectBudget();
+		observeRouteChanges(bus);
+		bus.on("page:changed", async () => {
+			logger.info(`route changed: ${window.location.pathname}`);
+			const rushKind = armedRushKind();
+			if (rushKind && tryRushRedirect(rushKind, "route change")) return;
 			registry.disposeAll();
 			await registry.activateAll(buildContext());
 		});

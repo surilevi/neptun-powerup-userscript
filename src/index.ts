@@ -16,6 +16,14 @@ import { versionWatchModule } from './modules/version-watch'
 import type { ThemeSettings } from './modules/pink-mode'
 import { DEFAULT_THEME } from './modules/pink-mode'
 import { hasConsent, storeConsent, resetConsent, showConsentDialog } from './core/consent'
+import {
+  clearRedirectBudget,
+  decideRushRedirect,
+  hasAccessToken,
+  isOnRushPage,
+  performRushRedirect,
+  type RushKind,
+} from './core/rush-navigation'
 
 async function main(): Promise<void> {
   const logger = createLogger('core')
@@ -100,17 +108,21 @@ async function main(): Promise<void> {
   const statusPanel = createStatusPanel(
     bus,
     {
-      onCourseRushChange: (on) => {
-        rushStorage
-          .set('courseRushMode', on)
-          .catch((err) => logger.error('failed to persist courseRushMode:', err))
+      onCourseRushChange: async (on) => {
+        try {
+          await rushStorage.set('courseRushMode', on)
+        } catch (err) {
+          logger.error('failed to persist courseRushMode:', err)
+        }
         logger.info(`Course Rush Mode ${on ? 'ON' : 'OFF'}`)
         statusPanel.addMessage('info', `Course Rush ${on ? 'on' : 'off'}`)
       },
-      onExamRushChange: (on) => {
-        rushStorage
-          .set('examRushMode', on)
-          .catch((err) => logger.error('failed to persist examRushMode:', err))
+      onExamRushChange: async (on) => {
+        try {
+          await rushStorage.set('examRushMode', on)
+        } catch (err) {
+          logger.error('failed to persist examRushMode:', err)
+        }
         logger.info(`Exam Rush Mode ${on ? 'ON' : 'OFF'}`)
         statusPanel.addMessage('info', `Exam Rush ${on ? 'on' : 'off'}`)
       },
@@ -147,43 +159,80 @@ async function main(): Promise<void> {
   // Activate modules for current page
   await registry.activateAll(buildContext())
 
-  // Track last path for detecting post-login navigation
-  let lastPath = extractPath(window.location.href)
+  /**
+   * Send an armed rush to its page.
+   *
+   * Evaluated from current page state rather than from a route transition, so it
+   * also covers the case the SPA handler below cannot see: a credential login
+   * that ends in a full page load, which is what happens on a real rush day.
+   */
+  function tryRushRedirect(kind: RushKind, reason: string): boolean {
+    const path = extractPath(window.location.href)
+    const decision = decideRushRedirect(kind, path, hasAccessToken())
+
+    if (decision.action === 'already-there') {
+      clearRedirectBudget()
+      return false
+    }
+
+    if (decision.action === 'budget-exhausted') {
+      logger.warn(`${kind} rush: redirect budget exhausted, staying on ${path}`)
+      statusPanel.addMessage(
+        'warn',
+        `Could not reach the ${kind === 'course' ? 'course registration' : 'exam'} page automatically. Open it manually and re-enable the rush.`,
+      )
+      return false
+    }
+
+    if (decision.action === 'wait-for-login') return false
+
+    logger.info(`${kind} rush: navigating to rush page (${reason})`)
+    statusPanel.addMessage(
+      'info',
+      `Opening ${kind === 'course' ? 'course registration' : 'exam overview'} for ${kind === 'course' ? 'Course' : 'Exam'} Rush...`,
+    )
+    registry.disposeAll()
+    performRushRedirect(decision.url)
+    return true
+  }
+
+  function armedRushKind(): RushKind | null {
+    if (statusPanel.getCourseRushMode()) return 'course'
+    if (statusPanel.getExamRushMode()) return 'exam'
+    return null
+  }
+
+  const initialRush = armedRushKind()
+  if (initialRush) {
+    if (isOnRushPage(initialRush, extractPath(window.location.href))) {
+      clearRedirectBudget()
+    } else if (!tryRushRedirect(initialRush, 'page load')) {
+      // Not authenticated yet — the login may complete without a route change,
+      // so react to the token appearing instead of to navigation.
+      const stopWaiting = bus.on('token:acquired', () => {
+        const kind = armedRushKind()
+        if (!kind) {
+          stopWaiting()
+          return
+        }
+        if (tryRushRedirect(kind, 'token acquired')) stopWaiting()
+      })
+    }
+  } else {
+    clearRedirectBudget()
+  }
 
   // Observe SPA route changes and re-evaluate modules on navigation
   observeRouteChanges(bus)
-  bus.on('page:changed', async (payload) => {
+  bus.on('page:changed', async () => {
     logger.info(`route changed: ${window.location.pathname}`)
 
-    const previousPath = lastPath
-    lastPath = payload.path
-
-    // --- Rush mode post-login redirect ---
-    // Detect login success: navigated away from /login to any other page
-    const wasOnLogin = previousPath === '/login' || previousPath.endsWith('/login')
-    const leftLogin = wasOnLogin && !payload.path.includes('/login')
-
-    if (leftLogin) {
-      const courseRush = statusPanel.getCourseRushMode()
-      const examRush = statusPanel.getExamRushMode()
-
-      if (courseRush) {
-        logger.info('Course Rush Mode: redirecting to registration page after login')
-        statusPanel.addMessage('info', 'Opening course registration for Course Rush...')
-        registry.disposeAll()
-        // Full navigation — Angular will initialize fresh on the new page
-        const pathPrefix = window.location.pathname.split('/')[1] || 'hallgatoi'
-        window.location.href = `${window.location.origin}/${pathPrefix}/subjects/registration`
-        return
-      } else if (examRush) {
-        logger.info('Exam Rush Mode: redirecting to exam overview after login')
-        statusPanel.addMessage('info', 'Opening exam overview for Exam Rush...')
-        registry.disposeAll()
-        const pathPrefix = window.location.pathname.split('/')[1] || 'hallgatoi'
-        window.location.href = `${window.location.origin}/${pathPrefix}/exams/overview/registration`
-        return
-      }
-    }
+    // --- Rush mode redirect ---
+    // Any navigation is a chance to get an armed rush onto its own page; the
+    // decision is made from current state, so it does not depend on having
+    // observed the login transition itself.
+    const rushKind = armedRushKind()
+    if (rushKind && tryRushRedirect(rushKind, 'route change')) return
 
     // Dispose modules that shouldn't run on the new page before re-activating
     registry.disposeAll()

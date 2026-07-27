@@ -4,6 +4,7 @@ import { waitForRequestComplete, type RequestCompletionResult } from '../../util
 import { extractSubjectCodeFromText, isLikelySubjectCode } from '../../utils/subject-code'
 import { getApi } from './state'
 import { waitForElement } from './helpers'
+import { PLANNER_TIMING } from './planner-policy'
 
 const AUTO_SEARCH_TIMEOUT_MS = 20_000
 const AUTO_SEARCH_POLL_MS = 250
@@ -691,7 +692,7 @@ export async function expandPanel(panel: Element): Promise<boolean> {
   const body = await waitForElement('.course-list-item-container', panel)
   if (!body) {
     api?.logger.warn('[dom-debug] expandPanel: waitForElement timed out, using fallback delay')
-    await delay(800)
+    await delay(PLANNER_TIMING.panelExpandFallbackMs)
   }
   const result = isPanelExpanded(panel)
   api?.logger.info(`[dom-debug] expandPanel: completed, expanded=${result}`)
@@ -753,7 +754,7 @@ export async function toggleCourse(courseItem: Element): Promise<void> {
     }
   }
 
-  await delay(100)
+  await delay(PLANNER_TIMING.domStateSettleMs)
   const isAfter = isCourseSelected(courseItem)
   if (wasBefore === isAfter) {
     api?.logger.warn('toggleCourse: --selected class did not change after click')

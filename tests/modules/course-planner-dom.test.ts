@@ -47,8 +47,9 @@ describe('Neptun timetable planner DOM adapter', () => {
       error: null,
     })
     expect(preparation.root?.tagName).toBe('NEPTUN-TIMETABLE-PLANNER-LIST-VIEW')
-    expect(getPlannerSubjectPanels(preparation.root ?? undefined)).toHaveLength(1)
-    expect(findPlannerSubjectPanel('ABC12DE345', preparation.root ?? undefined)).not.toBeNull()
+    const root = preparation.root as Element
+    expect(getPlannerSubjectPanels(root)).toHaveLength(1)
+    expect(findPlannerSubjectPanel('ABC12DE345', root)).not.toBeNull()
     expect(clickSpy).not.toHaveBeenCalled()
   })
 
@@ -278,6 +279,7 @@ describe('Neptun timetable planner DOM adapter', () => {
 
   it('requires the original panel identity when duplicate subject codes exist', () => {
     document.body.innerHTML = `
+      <neptun-timetable-planner>
       <neptun-timetable-planner-list-view>
         <neptun-subject-list-item>
           <mat-expansion-panel class="mat-expanded">
@@ -298,8 +300,9 @@ describe('Neptun timetable planner DOM adapter', () => {
           </mat-expansion-panel>
         </neptun-subject-list-item>
       </neptun-timetable-planner-list-view>
+      </neptun-timetable-planner>
     `
-    const panels = getPlannerSubjectPanels()
+    const panels = getPlannerSubjectPanels(document)
 
     expect(readPlannerSubjectTarget('ABC12DE345')).toBeNull()
     expect(readPlannerSubjectTarget('ABC12DE345', panels[0])?.courseCodes).toEqual(['A1'])
