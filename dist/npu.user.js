@@ -923,7 +923,6 @@ mat-expansion-panel {
 				case "refreshing":
 					sessionLine.textContent = "Session: refreshing...";
 					sessionLine.style.color = COLORS.yellow;
-					break;
 			}
 		}
 		function renderMessages() {
@@ -1402,10 +1401,10 @@ mat-expansion-panel {
 	function formatRemaining(ms) {
 		return Number.isFinite(ms) && ms >= 0 ? `${Math.round(ms / 1e3)}s` : "unknown";
 	}
-	var ACCESS_REFRESH_BUFFER_MS = 30 * 1e3;
-	var SESSION_REFRESH_BUFFER_MS = 150 * 1e3;
+	var ACCESS_REFRESH_BUFFER_MS = 3e4;
+	var SESSION_REFRESH_BUFFER_MS = 15e4;
 	var WATCHDOG_INTERVAL_MS = 15e3;
-	var ACTIVITY_PULSE_INTERVAL_MS = 4 * 6e4;
+	var ACTIVITY_PULSE_INTERVAL_MS = 24e4;
 	var NATIVE_REFRESH_SETTLE_MS = 6e3;
 	var FALLBACK_RETRY_MS = 1e4;
 	var watchdogTimer = null;
