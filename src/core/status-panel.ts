@@ -1,14 +1,16 @@
 import type { EventBus } from './event-bus'
 import type { ThemeSettings } from '../modules/pink-mode'
 import { DEFAULT_THEME, THEME_PRESETS } from '../modules/pink-mode'
+import { getScriptVersion } from '../utils/script-version'
 
 // ---------------------------------------------------------------------------
 // Rush mode callback types
 // ---------------------------------------------------------------------------
 
 export interface RushModeCallbacks {
-  onCourseRushChange: (on: boolean) => void
-  onExamRushChange: (on: boolean) => void
+  /** Returns once the new value is durably persisted, so a rush can disarm before it acts. */
+  onCourseRushChange: (on: boolean) => void | Promise<void>
+  onExamRushChange: (on: boolean) => void | Promise<void>
   onConsentReset?: () => void
   onThemeChange?: (settings: ThemeSettings) => void
 }
@@ -45,9 +47,10 @@ export interface StatusPanel {
   toggle(): void
   isExpanded(): boolean
   getCourseRushMode(): boolean
-  setCourseRushMode(on: boolean): void
+  /** Resolves once the change is persisted; await it before starting a rush run. */
+  setCourseRushMode(on: boolean): Promise<void>
   getExamRushMode(): boolean
-  setExamRushMode(on: boolean): void
+  setExamRushMode(on: boolean): Promise<void>
   getThemeSettings(): ThemeSettings
   setThemeSettings(settings: ThemeSettings): void
   onThemeSettingsChange(callback: (settings: ThemeSettings) => void): () => void
@@ -266,6 +269,20 @@ export function createStatusPanel(
     titleSpanRef.textContent = 'Neptun PowerUp!'
     header.appendChild(titleSpanRef)
 
+    // Always visible: several builds of this script exist side by side, and the
+    // version is the only reliable way to tell which one is actually running.
+    const versionSpan = document.createElement('span')
+    versionSpan.style.cssText = `
+      font-size: 10px;
+      font-weight: 600;
+      color: ${COLORS.textMuted};
+      margin-right: 8px;
+      flex-shrink: 0;
+    `
+    versionSpan.textContent = `v${getScriptVersion()}`
+    versionSpan.title = 'Installed Neptun PowerUp! userscript version'
+    header.appendChild(versionSpan)
+
     headerDot = document.createElement('span')
     headerDot.style.cssText = `
       width: 8px;
@@ -393,7 +410,7 @@ export function createStatusPanel(
     const courseLabel = document.createElement('label')
     courseLabel.className = 'npu-rush-toggle'
     courseLabel.title =
-      'After login, open course registration and enroll saved courses. Session keep-alive is not guaranteed during registration rushes.'
+      'After login, enroll exact courses already added to Neptun timetable planner. Locally saved courses are the fallback when the planner is empty. Disable Neptun’s registration confirmation popup first.'
     courseRushToggle = document.createElement('input')
     courseRushToggle.type = 'checkbox'
     courseRushToggle.checked = courseRushOn
@@ -880,20 +897,30 @@ export function createStatusPanel(
     return courseRushOn
   }
 
-  function setCourseRushModeValue(on: boolean): void {
+  /**
+   * Programmatic rush-mode changes must persist exactly like a user toggle.
+   * Assigning `checked` does not fire a `change` event, so the persistence
+   * callback has to be invoked here. Without it a rush that "turns itself off"
+   * stays armed in storage and re-runs on every later page load.
+   */
+  async function setCourseRushModeValue(on: boolean): Promise<void> {
+    if (courseRushOn === on) return
     courseRushOn = on
     if (courseRushToggle) courseRushToggle.checked = on
     updateDots()
+    await rushCallbacks?.onCourseRushChange(on)
   }
 
   function getExamRushMode(): boolean {
     return examRushOn
   }
 
-  function setExamRushModeValue(on: boolean): void {
+  async function setExamRushModeValue(on: boolean): Promise<void> {
+    if (examRushOn === on) return
     examRushOn = on
     if (examRushToggle) examRushToggle.checked = on
     updateDots()
+    await rushCallbacks?.onExamRushChange(on)
   }
 
   function dispose(): void {

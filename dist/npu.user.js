@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neptun PowerUp! Userscript
 // @namespace    https://github.com/surilevi/neptun-powerup-userscript
-// @version      3.2.1
+// @version      3.4.1
 // @author       surilevi
 // @description  Neptun PowerUp! userscript for course and exam workflows
 // @license      MIT
@@ -170,9 +170,9 @@
 			toggle: () => {},
 			isExpanded: () => false,
 			getCourseRushMode: () => false,
-			setCourseRushMode: () => {},
+			setCourseRushMode: () => Promise.resolve(),
 			getExamRushMode: () => false,
-			setExamRushMode: () => {},
+			setExamRushMode: () => Promise.resolve(),
 			getThemeSettings: () => ({
 				enabled: false,
 				color: "pink"
@@ -426,6 +426,12 @@ mat-expansion-panel {
 			api$4 = null;
 		}
 	};
+	function getScriptVersion() {
+		try {
+			if (typeof GM !== "undefined" && GM.info?.script?.version) return GM.info.script.version;
+		} catch {}
+		return "dev";
+	}
 	var MAX_MESSAGES = 5;
 	var COLORS = {
 		bg: "#16213e",
@@ -583,6 +589,17 @@ mat-expansion-panel {
     `;
 			titleSpanRef.textContent = "Neptun PowerUp!";
 			header.appendChild(titleSpanRef);
+			const versionSpan = document.createElement("span");
+			versionSpan.style.cssText = `
+      font-size: 10px;
+      font-weight: 600;
+      color: ${COLORS.textMuted};
+      margin-right: 8px;
+      flex-shrink: 0;
+    `;
+			versionSpan.textContent = `v${getScriptVersion()}`;
+			versionSpan.title = "Installed Neptun PowerUp! userscript version";
+			header.appendChild(versionSpan);
 			headerDot = document.createElement("span");
 			headerDot.style.cssText = `
       width: 8px;
@@ -696,7 +713,7 @@ mat-expansion-panel {
 			rushSection.appendChild(styleEl);
 			const courseLabel = document.createElement("label");
 			courseLabel.className = "npu-rush-toggle";
-			courseLabel.title = "After login, open course registration and enroll saved courses. Session keep-alive is not guaranteed during registration rushes.";
+			courseLabel.title = "After login, enroll exact courses already added to Neptun timetable planner. Locally saved courses are the fallback when the planner is empty. Disable Neptun’s registration confirmation popup first.";
 			courseRushToggle = document.createElement("input");
 			courseRushToggle.type = "checkbox";
 			courseRushToggle.checked = courseRushOn;
@@ -1068,18 +1085,22 @@ mat-expansion-panel {
 		function getCourseRushMode() {
 			return courseRushOn;
 		}
-		function setCourseRushModeValue(on) {
+		async function setCourseRushModeValue(on) {
+			if (courseRushOn === on) return;
 			courseRushOn = on;
 			if (courseRushToggle) courseRushToggle.checked = on;
 			updateDots();
+			await rushCallbacks?.onCourseRushChange(on);
 		}
 		function getExamRushMode() {
 			return examRushOn;
 		}
-		function setExamRushModeValue(on) {
+		async function setExamRushModeValue(on) {
+			if (examRushOn === on) return;
 			examRushOn = on;
 			if (examRushToggle) examRushToggle.checked = on;
 			updateDots();
+			await rushCallbacks?.onExamRushChange(on);
 		}
 		function dispose() {
 			stopCountdown();
@@ -1744,7 +1765,29 @@ mat-expansion-panel {
 			api$3 = null;
 		}
 	};
-	var WAIT_TIMEOUT_MS = 5e3;
+	var PLANNER_TIMING = Object.freeze({
+		interactiveReadinessTimeoutMs: 3e4,
+		rushReadinessTimeoutMs: 6e4,
+		enrollmentRequestTimeoutMs: 3e4,
+		enrollmentUiUpdateTimeoutMs: 5e3,
+		listStabilityWindowMs: 500,
+		domPollIntervalMs: 50,
+		outcomePollIntervalMs: 100,
+		controlActionCooldownMs: 1200,
+		controlActionSettleMs: 3e3,
+		controlActionMaxAttempts: 3,
+		panelExpandTimeoutMs: 5e3,
+		panelExpandFallbackMs: 800,
+		domStateSettleMs: 150,
+		enrollmentMaxAttempts: 3,
+		enrollmentRetryBaseDelayMs: 700,
+		notificationSettleMs: 1500,
+		apiRequestTimeoutMs: 8e3,
+		apiMaxAttempts: 3,
+		apiRetryBaseDelayMs: 400,
+		apiConfirmationDelayMs: 600
+	});
+	var WAIT_TIMEOUT_MS = PLANNER_TIMING.panelExpandTimeoutMs;
 	var STORAGE_KEY$2 = "courseSelections";
 	var api$2 = null;
 	var isEnrolling = false;
@@ -2418,7 +2461,7 @@ mat-expansion-panel {
 		api?.logger.info("[dom-debug] expandPanel: clicked header, waiting for course items...");
 		if (!await waitForElement(".course-list-item-container", panel)) {
 			api?.logger.warn("[dom-debug] expandPanel: waitForElement timed out, using fallback delay");
-			await delay(800);
+			await delay(PLANNER_TIMING.panelExpandFallbackMs);
 		}
 		const result = isPanelExpanded(panel);
 		api?.logger.info(`[dom-debug] expandPanel: completed, expanded=${result}`);
@@ -2455,7 +2498,7 @@ mat-expansion-panel {
 				} else api?.logger.warn("[dom-debug] toggleCourse: no click target found");
 			}
 		}
-		await delay(100);
+		await delay(PLANNER_TIMING.domStateSettleMs);
 		if (wasBefore === isCourseSelected(courseItem)) api?.logger.warn("toggleCourse: --selected class did not change after click");
 	}
 	async function loadStoredSelections() {
@@ -2660,10 +2703,1134 @@ mat-expansion-panel {
 		api?.statusPanel.addMessage("info", `Saved ${newCount} subject${newCount === 1 ? "" : "s"}. Total stored: ${totalSubjects}.`);
 		await renderModuleUI$1();
 	}
-	var COURSE_UI_BUILD = "3.1.2 coursestore-select-a";
+	function isElementAvailable(element) {
+		if (!element.isConnected) return false;
+		if (element instanceof HTMLButtonElement && element.disabled) return false;
+		let current = element;
+		while (current) {
+			if (current.hidden || current.hasAttribute("hidden") || current.hasAttribute("inert") || current.getAttribute("aria-hidden") === "true" || current.getAttribute("aria-disabled") === "true") return false;
+			const style = window.getComputedStyle(current);
+			if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.pointerEvents === "none") return false;
+			current = current.parentElement;
+		}
+		return true;
+	}
+	var runSequence = 0;
+	function monotonicNow() {
+		try {
+			return performance.now();
+		} catch {
+			return Date.now();
+		}
+	}
+	function formatDetails(details) {
+		return Object.entries(details).filter(([, value]) => value !== void 0).map(([key, value]) => `${key}=${value === null ? "null" : String(value)}`).join(" ");
+	}
+	function createPlannerDiagnostics(operation) {
+		const startedAt = monotonicNow();
+		const runId = `planner-${Date.now().toString(36)}-${++runSequence}`;
+		return {
+			runId,
+			log(event, details = {}) {
+				try {
+					const elapsedMs = Math.round(monotonicNow() - startedAt);
+					const tail = formatDetails(details);
+					console.info(`[NPU:planner] ${runId} ${operation} +${elapsedMs}ms ${event}${tail ? ` ${tail}` : ""}`);
+				} catch {}
+			}
+		};
+	}
+	var PLANNED_SUBJECTS_ENDPOINT = "SubjectApplication/ScheduledSubjectsWithScheduledCourses";
+	var WARNING_MODAL_STATES_ENDPOINT = "ContextUserProfile/GetSubjectSigninWarningModalsStates";
+	function readAccessToken() {
+		try {
+			return sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken);
+		} catch {
+			return null;
+		}
+	}
+	function resolveApiBase() {
+		try {
+			const entry = performance.getEntriesByType("resource").map((resource) => resource.name).find((name) => name.includes("/api/SubjectApplication/"));
+			if (entry) {
+				const marker = entry.indexOf("/api/");
+				if (marker !== -1) return entry.slice(0, marker + 5);
+			}
+		} catch {}
+		const prefix = window.location.pathname.split("/")[1] || "hallgatoi";
+		return `${window.location.origin}/${prefix}/api/`;
+	}
+	function resolveTermId() {
+		let latest = null;
+		try {
+			for (const resource of performance.getEntriesByType("resource")) {
+				if (!resource.name.includes("/api/SubjectApplication/")) continue;
+				let termId = null;
+				try {
+					termId = new URL(resource.name).searchParams.get("request.termId");
+				} catch {
+					continue;
+				}
+				if (!termId) continue;
+				if (!latest || resource.startTime >= latest.startTime) latest = {
+					termId,
+					startTime: resource.startTime
+				};
+			}
+		} catch {
+			return null;
+		}
+		return latest?.termId ?? null;
+	}
+	function isPlannerApiUsable() {
+		return readAccessToken() !== null && resolveTermId() !== null;
+	}
+	function isRetryableStatus(status) {
+		return status === 429 || status >= 500;
+	}
+	async function getJson(path, params) {
+		const token = readAccessToken();
+		if (!token) return {
+			envelope: null,
+			failure: "no-token",
+			status: null
+		};
+		const url = new URL(resolveApiBase() + path);
+		for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+		let lastStatus = null;
+		let lastFailure = "network";
+		for (let attempt = 1; attempt <= PLANNER_TIMING.apiMaxAttempts; attempt++) {
+			const controller = new AbortController();
+			const timer = setTimeout(() => controller.abort(), PLANNER_TIMING.apiRequestTimeoutMs);
+			try {
+				const response = await fetch(url.toString(), {
+					method: "GET",
+					headers: {
+						Authorization: `Bearer ${token}`,
+						Accept: "application/json"
+					},
+					credentials: "include",
+					signal: controller.signal
+				});
+				lastStatus = response.status;
+				if (response.status === 401 || response.status === 403) return {
+					envelope: null,
+					failure: "unauthorized",
+					status: response.status
+				};
+				if (!response.ok) {
+					lastFailure = "server-error";
+					if (!isRetryableStatus(response.status)) return {
+						envelope: null,
+						failure: "server-error",
+						status: response.status
+					};
+				} else try {
+					return {
+						envelope: await response.json(),
+						failure: null,
+						status: response.status
+					};
+				} catch {
+					return {
+						envelope: null,
+						failure: "malformed",
+						status: response.status
+					};
+				}
+			} catch {
+				lastFailure = "network";
+			} finally {
+				clearTimeout(timer);
+			}
+			if (attempt < PLANNER_TIMING.apiMaxAttempts) await delay(PLANNER_TIMING.apiRetryBaseDelayMs * attempt);
+		}
+		return {
+			envelope: null,
+			failure: lastFailure,
+			status: lastStatus
+		};
+	}
+	function asRecord(value) {
+		return typeof value === "object" && value !== null ? value : null;
+	}
+	function toPlannedSubject(raw) {
+		const record = asRecord(raw);
+		if (!record) return null;
+		const code = typeof record.code === "string" ? record.code.trim() : "";
+		if (!code) return null;
+		const courseIds = Array.isArray(record.scheduledCourseIds) ? record.scheduledCourseIds.filter((id) => typeof id === "string") : [];
+		const uiState = asRecord(record.uiDisplayState);
+		return {
+			code,
+			title: typeof record.title === "string" ? record.title : "",
+			scheduledCourseIds: courseIds,
+			isRegistered: record.isRegistered === true,
+			isWaiting: record.isWaiting === true,
+			isInProgress: record.isInProgress === true,
+			isCompleted: record.isCompleted === true,
+			uiDisplayStateType: typeof uiState?.type === "number" ? uiState.type : null
+		};
+	}
+	async function fetchPlannedSubjects(termId) {
+		const resolvedTermId = termId ?? resolveTermId();
+		if (!resolvedTermId) return {
+			ok: false,
+			failure: "no-term",
+			status: null,
+			subjects: []
+		};
+		const { envelope, failure, status } = await getJson(PLANNED_SUBJECTS_ENDPOINT, {
+			"request.termId": resolvedTermId,
+			"request.withRegisteredSubjects": "true"
+		});
+		if (failure) return {
+			ok: false,
+			failure,
+			status,
+			subjects: []
+		};
+		if (!Array.isArray(envelope?.data)) return {
+			ok: false,
+			failure: "malformed",
+			status,
+			subjects: []
+		};
+		return {
+			ok: true,
+			failure: null,
+			status,
+			subjects: envelope.data.map(toPlannedSubject).filter((subject) => subject !== null)
+		};
+	}
+	async function fetchWarningModalStates() {
+		if (!isPlannerApiUsable()) return {
+			scheduledCoursesInTimetableSuppressed: null,
+			oneSubjectCanBeTakenSuppressed: null
+		};
+		const { envelope } = await getJson(WARNING_MODAL_STATES_ENDPOINT, {});
+		const data = asRecord(envelope?.data);
+		return {
+			scheduledCoursesInTimetableSuppressed: typeof data?.scheduledCoursesInTimetableDontAppearAgain === "boolean" ? data.scheduledCoursesInTimetableDontAppearAgain : null,
+			oneSubjectCanBeTakenSuppressed: typeof data?.oneSubjectCanBeTakenDontAppearAgain === "boolean" ? data.oneSubjectCanBeTakenDontAppearAgain : null
+		};
+	}
+	var PLANNER_ROOT_SELECTOR = "neptun-timetable-planner";
+	var PLANNER_LIST_SELECTOR = "neptun-timetable-planner-list-view";
+	var PLANNER_TOGGLE_SELECTOR = "button.timetable-planner__toggle-button";
+	var PLANNER_VIEW_SELECT_ID = "timetable-planner-view-typeSelect";
+	var PLANNER_SUBJECT_CONTAINER_ID_PREFIX = "signed-and-scheduled-subjects";
+	function normalizeText$1(text) {
+		return text.normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
+	}
+	function isListViewText(text) {
+		const normalized = normalizeText$1(text);
+		return normalized.includes("lista nezet") || normalized.includes("list view");
+	}
+	function isPlannerExplicitlyEmpty(root) {
+		const text = normalizeText$1(root.textContent ?? "");
+		if (!text) return false;
+		return [
+			"nincs megjelenitheto adat",
+			"nincs tervezohoz adott targy",
+			"no planned subjects",
+			"no data to display"
+		].some((message) => text.includes(message));
+	}
+	function getPlannerRoot() {
+		return document.querySelector(PLANNER_ROOT_SELECTOR);
+	}
+	function isInPlannerScope(element) {
+		return element.closest(`${PLANNER_ROOT_SELECTOR}, ${PLANNER_LIST_SELECTOR}`) !== null;
+	}
+	function getPlannerListRoot() {
+		return Array.from(document.querySelectorAll(PLANNER_LIST_SELECTOR)).find((root) => isElementAvailable(root)) ?? null;
+	}
+	function getPlannerSubjectPanels(root) {
+		const scoped = Array.from(root.querySelectorAll("neptun-subject-list-item mat-expansion-panel"));
+		return (scoped.length > 0 ? scoped : Array.from(root.querySelectorAll("mat-expansion-panel"))).filter(isPlannerSubjectPanel);
+	}
+	function isPlannerSubjectPanel(panel) {
+		if (!isInPlannerScope(panel)) return false;
+		const id = panel.closest("[id]")?.id ?? "";
+		if (!id) return true;
+		return !id.startsWith("subject-registration") || id.startsWith(PLANNER_SUBJECT_CONTAINER_ID_PREFIX);
+	}
+	function isPlannerToggleText(text) {
+		const normalized = normalizeText$1(text);
+		return normalized.includes("orarendtervezo") || normalized.includes("timetable planner");
+	}
+	function findPlannerToggle() {
+		const availableExact = Array.from(document.querySelectorAll(PLANNER_TOGGLE_SELECTOR)).find((button) => isElementAvailable(button));
+		if (availableExact) return availableExact;
+		return Array.from(document.querySelectorAll("button")).find((button) => isElementAvailable(button) && isPlannerToggleText(`${button.getAttribute("aria-label") ?? ""} ${button.textContent ?? ""}`)) ?? null;
+	}
+	function findPlannerViewControl() {
+		const exact = document.getElementById(PLANNER_VIEW_SELECT_ID);
+		if (exact && isElementAvailable(exact)) return exact;
+		const planner = getPlannerRoot();
+		if (!planner) return null;
+		return Array.from(planner.querySelectorAll(`#${PLANNER_VIEW_SELECT_ID}, neptun-form-select-v2 mat-select, neptun-form-select-v2 [role="combobox"], neptun-form-select-v2`)).find((control) => isElementAvailable(control)) ?? null;
+	}
+	function getViewClickTarget(control) {
+		return control.querySelector("[role=\"combobox\"], mat-select, .mat-mdc-select-trigger") ?? control;
+	}
+	function findListViewOption() {
+		return Array.from(document.querySelectorAll("mat-option, [role=\"option\"]")).find((option) => isElementAvailable(option) && isListViewText(option.textContent ?? "")) ?? null;
+	}
+	function readPlannerOpenState() {
+		if (getPlannerListRoot() || findPlannerViewControl()) return "open";
+		const toggle = findPlannerToggle();
+		if (!toggle) return "unknown";
+		const label = normalizeText$1(`${toggle.getAttribute("aria-label") ?? ""} ${toggle.textContent ?? ""}`);
+		if (label.includes("megnyit") || label.includes("open")) return "closed";
+		if (label.includes("bezar") || label.includes("close")) return "open";
+		if (isPlannerToggleText(label)) return "closed";
+		return "unknown";
+	}
+	var ControlActionGate = class {
+		lastActionAt = new Map();
+		attempts = new Map();
+		canAct(key, cooldownMs) {
+			if (this.attemptsFor(key) >= PLANNER_TIMING.controlActionMaxAttempts) return false;
+			const last = this.lastActionAt.get(key);
+			return last === void 0 || Date.now() - last >= cooldownMs;
+		}
+		record(key) {
+			this.lastActionAt.set(key, Date.now());
+			this.attempts.set(key, this.attemptsFor(key) + 1);
+		}
+		attemptsFor(key) {
+			return this.attempts.get(key) ?? 0;
+		}
+	};
+	async function acquirePlannerListView(deadline, diagnostics) {
+		const gate = new ControlActionGate();
+		let openedPlanner = false;
+		let switchedToList = false;
+		let lastState = "";
+		while (Date.now() < deadline) {
+			const listRoot = getPlannerListRoot();
+			if (listRoot) return {
+				root: listRoot,
+				openedPlanner,
+				switchedToList,
+				error: null
+			};
+			const openState = readPlannerOpenState();
+			const viewControl = findPlannerViewControl();
+			const state = `${openState}|${viewControl ? "view" : "no-view"}`;
+			if (state !== lastState) {
+				lastState = state;
+				diagnostics.log("acquire:state", {
+					open: openState,
+					viewControl: viewControl !== null,
+					toggleAttempts: gate.attemptsFor("toggle"),
+					viewAttempts: gate.attemptsFor("view")
+				});
+			}
+			if (openState === "closed") {
+				const toggle = findPlannerToggle();
+				if (toggle && gate.canAct("toggle", PLANNER_TIMING.controlActionSettleMs)) {
+					diagnostics.log("acquire:toggle-click", { attempt: gate.attemptsFor("toggle") + 1 });
+					toggle.click();
+					gate.record("toggle");
+					openedPlanner = true;
+				}
+				await delay(PLANNER_TIMING.domPollIntervalMs);
+				continue;
+			}
+			if (viewControl && !isListViewText(viewControl.textContent ?? "")) {
+				const listOption = findListViewOption();
+				if (listOption) {
+					diagnostics.log("acquire:list-option-click");
+					listOption.click();
+					gate.record("view");
+					switchedToList = true;
+				} else if (gate.canAct("view", PLANNER_TIMING.controlActionCooldownMs)) {
+					diagnostics.log("acquire:view-selector-click", { attempt: gate.attemptsFor("view") + 1 });
+					getViewClickTarget(viewControl).click();
+					gate.record("view");
+				}
+			}
+			await delay(PLANNER_TIMING.domPollIntervalMs);
+		}
+		return {
+			root: null,
+			openedPlanner,
+			switchedToList,
+			error: describeAcquisitionFailure(readPlannerOpenState(), gate)
+		};
+	}
+	function describeAcquisitionFailure(state, gate) {
+		if (state === "unknown") return "Neptun timetable planner toggle action could not be identified safely";
+		if (state === "closed") return gate.attemptsFor("toggle") > 0 ? `Neptun timetable planner did not stay open after ${gate.attemptsFor("toggle")} attempts` : "Neptun timetable planner did not open in time";
+		return "Neptun timetable planner list did not render in time";
+	}
+	async function preparePlannerListView(options = {}) {
+		const diagnostics = options.diagnostics ?? createPlannerDiagnostics(options.operation ?? "prepare");
+		const timeoutMs = options.entryPointTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs;
+		diagnostics.log("prepare:start", {
+			readinessTimeoutMs: timeoutMs,
+			pollIntervalMs: PLANNER_TIMING.domPollIntervalMs
+		});
+		const result = await acquirePlannerListView(Date.now() + timeoutMs, diagnostics);
+		diagnostics.log(result.root ? "prepare:ready" : "prepare:failed", {
+			openedPlanner: result.openedPlanner,
+			switchedToList: result.switchedToList,
+			failure: result.error
+		});
+		return result;
+	}
+	function findEnrollmentButton$1(panel) {
+		return Array.from(panel.querySelectorAll("button")).find((button) => isEnrollButtonText(button.textContent ?? "")) ?? null;
+	}
+	function readExpandedPlannerSubject(subjectCode, panel) {
+		const selectedCourseItems = getCourseItems(panel).filter((item) => isCourseSelected(item));
+		const courseCodes = Array.from(new Set(selectedCourseItems.map((item) => extractCourseCode(item)).filter((code) => code !== null)));
+		const enrollmentButton = findEnrollmentButton$1(panel);
+		let issue = null;
+		if (selectedCourseItems.length === 0) issue = `${subjectCode}: no planned course is selected`;
+		else if (courseCodes.length !== selectedCourseItems.length) issue = `${subjectCode}: one or more planned course codes could not be read`;
+		else if (!enrollmentButton) issue = `${subjectCode}: already registered or enrollment action unavailable`;
+		else if (!isElementAvailable(enrollmentButton)) issue = `${subjectCode}: enrollment action unavailable`;
+		return {
+			subjectCode,
+			panel,
+			selectedCourseItems,
+			courseCodes,
+			enrollmentButton,
+			available: issue === null,
+			issue
+		};
+	}
+	function readPlannerSubjectTarget(subjectCode, preferredPanel) {
+		const root = getPlannerListRoot();
+		if (!root) return null;
+		let panel = preferredPanel?.isConnected && root.contains(preferredPanel) ? preferredPanel : void 0;
+		if (!panel) {
+			const matches = getPlannerSubjectPanels(root).filter((candidate) => extractSubjectCode(candidate) === subjectCode);
+			if (matches.length !== 1) return null;
+			panel = matches[0];
+		}
+		return readExpandedPlannerSubject(subjectCode, panel);
+	}
+	async function waitForStableSubjectList(root, deadline, apiPlannedCount, diagnostics) {
+		let lastSignature = "";
+		let stableSince = Date.now();
+		while (Date.now() < deadline) {
+			const panels = getPlannerSubjectPanels(root);
+			const codes = panels.map((panel) => extractSubjectCode(panel));
+			if (panels.length > 0 && codes.every((code) => code !== null)) {
+				const matchesApi = apiPlannedCount === null || panels.length >= apiPlannedCount;
+				const signature = codes.join("|");
+				if (matchesApi && signature === lastSignature) {
+					if (Date.now() - stableSince >= PLANNER_TIMING.listStabilityWindowMs) return {
+						panels,
+						explicitlyEmpty: false
+					};
+				} else {
+					lastSignature = signature;
+					stableSince = Date.now();
+				}
+			}
+			if (apiPlannedCount === 0) {
+				diagnostics.log("subject-list:empty-confirmed-by-api");
+				return {
+					panels: [],
+					explicitlyEmpty: true
+				};
+			}
+			if (panels.length === 0 && isPlannerExplicitlyEmpty(root)) {
+				diagnostics.log("subject-list:empty-state-rendered");
+				return {
+					panels: [],
+					explicitlyEmpty: true
+				};
+			}
+			await delay(PLANNER_TIMING.domPollIntervalMs);
+		}
+		return {
+			panels: getPlannerSubjectPanels(root),
+			explicitlyEmpty: false
+		};
+	}
+	async function collectPlannerSnapshot(options = {}) {
+		const diagnostics = options.diagnostics ?? createPlannerDiagnostics(options.operation ?? "prepare");
+		const contentTimeoutMs = options.contentTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs;
+		const apiPromise = fetchPlannedSubjects().catch(() => null);
+		const preparation = await preparePlannerListView({
+			...options,
+			diagnostics
+		});
+		const apiResult = await apiPromise;
+		const plannedFromApi = apiResult?.ok ? apiResult.subjects : null;
+		const apiPlannedCount = plannedFromApi?.length ?? null;
+		diagnostics.log("api:planned-subjects", {
+			ok: apiResult?.ok ?? false,
+			failure: apiResult?.failure ?? "unavailable",
+			count: apiPlannedCount
+		});
+		if (!preparation.root) return {
+			diagnosticRunId: diagnostics.runId,
+			preparation,
+			contentReady: false,
+			listedSubjects: 0,
+			subjects: [],
+			plannedFromApi,
+			issues: [preparation.error ?? "Neptun timetable planner list is unavailable"]
+		};
+		const issues = [];
+		const subjects = [];
+		const contentDeadline = Date.now() + contentTimeoutMs;
+		diagnostics.log("subject-list:waiting", {
+			timeoutMs: contentTimeoutMs,
+			stabilityWindowMs: PLANNER_TIMING.listStabilityWindowMs,
+			expectedFromApi: apiPlannedCount
+		});
+		const { panels: plannerPanels, explicitlyEmpty } = await waitForStableSubjectList(preparation.root, contentDeadline, apiPlannedCount, diagnostics);
+		const subjectEntries = plannerPanels.map((panel) => ({
+			panel,
+			subjectCode: extractSubjectCode(panel)
+		})).filter((entry) => entry.subjectCode !== null);
+		if (subjectEntries.length === 0) {
+			diagnostics.log("snapshot:complete", {
+				contentReady: explicitlyEmpty,
+				listedSubjects: plannerPanels.length,
+				readableSubjects: 0,
+				issueCount: 1
+			});
+			return {
+				diagnosticRunId: diagnostics.runId,
+				preparation,
+				contentReady: explicitlyEmpty,
+				listedSubjects: plannerPanels.length,
+				subjects,
+				plannedFromApi,
+				issues: [explicitlyEmpty ? "No planned subjects are visible in Neptun timetable planner list view" : plannerPanels.length === 0 ? "Neptun timetable planner subjects did not finish loading" : "Planner subjects are visible, but their subject codes could not be read safely"]
+			};
+		}
+		diagnostics.log("subject-list:ready", {
+			panelCount: plannerPanels.length,
+			readableCount: subjectEntries.length
+		});
+		const expandedEntries = [];
+		for (const { subjectCode, panel } of subjectEntries) {
+			if (!panel.isConnected) {
+				issues.push(`${subjectCode}: planner subject disappeared before expansion`);
+				continue;
+			}
+			if (!await expandPanel(panel)) {
+				issues.push(`${subjectCode}: planner subject could not be expanded`);
+				continue;
+			}
+			expandedEntries.push({
+				subjectCode,
+				panel
+			});
+		}
+		diagnostics.log("subject-panels:expanded", {
+			expandedCount: expandedEntries.length,
+			failedCount: subjectEntries.length - expandedEntries.length
+		});
+		diagnostics.log("course-rows:waiting", { timeoutMs: contentTimeoutMs });
+		while (Date.now() < contentDeadline && expandedEntries.some(({ panel }) => getCourseItems(panel).length === 0)) await delay(PLANNER_TIMING.domPollIntervalMs);
+		for (const { subjectCode, panel } of expandedEntries) {
+			if (getCourseItems(panel).length === 0) {
+				issues.push(`${subjectCode}: planner course rows did not finish loading`);
+				continue;
+			}
+			const liveTarget = readPlannerSubjectTarget(subjectCode, panel);
+			if (!liveTarget) {
+				issues.push(`${subjectCode}: planner subject disappeared after expansion`);
+				continue;
+			}
+			subjects.push(liveTarget);
+			if (liveTarget.issue) issues.push(liveTarget.issue);
+		}
+		diagnostics.log("snapshot:complete", {
+			contentReady: true,
+			listedSubjects: plannerPanels.length,
+			readableSubjects: subjects.length,
+			issueCount: issues.length
+		});
+		return {
+			diagnosticRunId: diagnostics.runId,
+			preparation,
+			contentReady: true,
+			listedSubjects: plannerPanels.length,
+			subjects,
+			plannedFromApi,
+			issues
+		};
+	}
+	function closePlannerSafely() {
+		if (readPlannerOpenState() !== "open") return false;
+		const toggle = findPlannerToggle();
+		if (!toggle) return false;
+		toggle.click();
+		return true;
+	}
+	var ENROLLMENT_ENDPOINT = "SubjectApplication/SubjectSignin";
+	var plannerEnrollmentInFlight = null;
+	function emptyResult(error) {
+		return {
+			plannerReady: false,
+			openedPlanner: false,
+			listedSubjects: 0,
+			plannedSubjects: 0,
+			eligibleSubjects: 0,
+			attempted: 0,
+			enrolled: 0,
+			failed: 0,
+			skipped: 0,
+			unconfirmed: 0,
+			aborted: false,
+			errors: error ? [error] : []
+		};
+	}
+	function normalizeCodes(codes) {
+		return codes.map((code) => code.replace(/\s+/g, "").toUpperCase()).sort();
+	}
+	function courseSelectionMatches(expected, actual) {
+		const normalizedExpected = normalizeCodes(expected);
+		const normalizedActual = normalizeCodes(actual);
+		return normalizedExpected.length === normalizedActual.length && normalizedExpected.every((code, index) => code === normalizedActual[index]);
+	}
+	function normalizeDialogText(text) {
+		return text.normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
+	}
+	function isEnrollmentConfirmationDialog(dialog) {
+		const text = normalizeDialogText(dialog.textContent ?? "");
+		if (text.includes("confirm subject registration") || text.includes("biztosan felveszi") || text.includes("targyfelvetel megerositese")) return true;
+		const buttonLabels = Array.from(dialog.querySelectorAll("button")).map((button) => normalizeDialogText(button.textContent ?? ""));
+		const hasAccept = buttonLabels.some((label) => [
+			"igen",
+			"yes",
+			"ok"
+		].includes(label));
+		const hasReject = buttonLabels.some((label) => [
+			"nem",
+			"no",
+			"megse",
+			"cancel"
+		].includes(label));
+		return hasAccept && hasReject;
+	}
+	function getVisibleDialogs() {
+		return Array.from(document.querySelectorAll("[role=\"dialog\"], mat-dialog-container, .mat-mdc-dialog-container")).filter((dialog) => isElementAvailable(dialog) && isEnrollmentConfirmationDialog(dialog));
+	}
+	function getVisibleNotificationState() {
+		return Array.from(document.querySelectorAll(".cdk-overlay-pane, [role=\"status\"], [aria-live=\"polite\"], [aria-live=\"assertive\"]")).filter((element) => isElementAvailable(element) && !isEnrollmentConfirmationDialog(element)).map((element) => normalizeDialogText(element.textContent ?? "")).filter(Boolean).join("|");
+	}
+	function isFailureNotification(text) {
+		return [
+			"sikertelen",
+			"failed",
+			"hiba",
+			"error",
+			"nincs targyjelentkezesi idoszak"
+		].some((marker) => text.includes(marker));
+	}
+	var RUN_FATAL_NOTIFICATION_MARKERS = [
+		"nincs targyjelentkezesi idoszak",
+		"no subject registration period",
+		"lejart a targyjelentkezesi idoszak"
+	];
+	function isRunFatalNotification(text) {
+		return RUN_FATAL_NOTIFICATION_MARKERS.some((marker) => text.includes(marker));
+	}
+	async function waitForNewNotification(notificationStateBeforeClick, timeoutMs = PLANNER_TIMING.notificationSettleMs) {
+		const startedAt = Date.now();
+		while (Date.now() - startedAt < timeoutMs) {
+			const current = getVisibleNotificationState();
+			if (current && current !== notificationStateBeforeClick) return current;
+			await delay(PLANNER_TIMING.outcomePollIntervalMs);
+		}
+		return getVisibleNotificationState();
+	}
+	function classifyFailure(status, notification) {
+		if (isRunFatalNotification(notification)) return "run-fatal";
+		if (isFailureNotification(notification)) return "rejected";
+		if (status === 429 || status === 502 || status === 503 || status === 504) return "retryable";
+		return "rejected";
+	}
+	function getEnrollmentRequests() {
+		try {
+			return performance.getEntriesByType("resource").filter((entry) => entry.name.includes(ENROLLMENT_ENDPOINT));
+		} catch {
+			return [];
+		}
+	}
+	async function waitForEnrollmentOutcome(requestsBeforeClick, dialogsBeforeClick, timeoutMs = PLANNER_TIMING.enrollmentRequestTimeoutMs) {
+		const startedWaitingAt = Date.now();
+		while (Date.now() - startedWaitingAt < timeoutMs) {
+			if (getVisibleDialogs().find((dialog) => !dialogsBeforeClick.has(dialog))) return { type: "confirmation-required" };
+			const requests = getEnrollmentRequests();
+			const request = requests.length > requestsBeforeClick ? requests[requests.length - 1] : null;
+			if (request) {
+				const responseStatus = request.responseStatus;
+				return {
+					type: "request",
+					status: typeof responseStatus === "number" ? responseStatus : null
+				};
+			}
+			await delay(PLANNER_TIMING.outcomePollIntervalMs);
+		}
+		return { type: "timeout" };
+	}
+	function hasVisibleEnrollmentAction(subjectCode) {
+		const root = getPlannerListRoot();
+		if (!root) return false;
+		return getPlannerSubjectPanels(root).filter((panel) => extractSubjectCode(panel) === subjectCode).some((panel) => Array.from(panel.querySelectorAll("button")).some((button) => isEnrollButtonText(button.textContent ?? "") && isElementAvailable(button)));
+	}
+	async function waitForPlannerUiOutcome(subjectCode, notificationStateBeforeClick, timeoutMs = PLANNER_TIMING.enrollmentUiUpdateTimeoutMs) {
+		const startedAt = Date.now();
+		while (Date.now() - startedAt < timeoutMs) {
+			if (!hasVisibleEnrollmentAction(subjectCode)) return "updated";
+			const notificationState = getVisibleNotificationState();
+			if (notificationState !== notificationStateBeforeClick && isFailureNotification(notificationState)) return "failure-notification";
+			await delay(PLANNER_TIMING.outcomePollIntervalMs);
+		}
+		return "timeout";
+	}
+	async function confirmEnrollment(subjectCode, apiUsable, notificationStateBeforeClick, diagnostics) {
+		if (apiUsable) {
+			await delay(PLANNER_TIMING.apiConfirmationDelayMs);
+			const refreshed = await fetchPlannedSubjects().catch(() => null);
+			if (refreshed?.ok) {
+				const match = refreshed.subjects.find((subject) => subject.code === subjectCode);
+				diagnostics.log("confirm:api", {
+					found: match !== void 0,
+					isRegistered: match?.isRegistered ?? null
+				});
+				if (!match) return "registered";
+				return match.isRegistered ? "registered" : "rejected";
+			}
+			diagnostics.log("confirm:api-unavailable", { failure: refreshed?.failure ?? "error" });
+		}
+		const uiOutcome = await waitForPlannerUiOutcome(subjectCode, notificationStateBeforeClick);
+		diagnostics.log("confirm:ui", { outcome: uiOutcome });
+		if (uiOutcome === "updated") return "registered";
+		if (uiOutcome === "failure-notification") return "rejected";
+		return "unknown";
+	}
+	function validateTarget(target) {
+		const liveTarget = readPlannerSubjectTarget(target.subjectCode, target.panel);
+		if (!liveTarget || !liveTarget.available || !liveTarget.enrollmentButton || !courseSelectionMatches(target.courseCodes, liveTarget.courseCodes)) return null;
+		return liveTarget;
+	}
+	async function enrollSingleSubject(target, apiUsable, diagnostics, targetIndex) {
+		let lastError = `${target.subjectCode}: enrollment did not complete`;
+		for (let attempt = 1; attempt <= PLANNER_TIMING.enrollmentMaxAttempts; attempt++) {
+			const liveTarget = validateTarget(target);
+			if (!liveTarget?.enrollmentButton) {
+				if (attempt > 1) {
+					if (await confirmEnrollment(target.subjectCode, apiUsable, "", diagnostics) === "registered") return {
+						outcome: "enrolled",
+						error: null
+					};
+					return {
+						outcome: "failed",
+						error: lastError
+					};
+				}
+				return {
+					outcome: "selection-changed",
+					error: `${target.subjectCode}: planner selection changed before enrollment`
+				};
+			}
+			const dialogsBeforeClick = new Set(getVisibleDialogs());
+			const notificationStateBeforeClick = getVisibleNotificationState();
+			const requestsBeforeClick = getEnrollmentRequests().length;
+			diagnostics.log("target:click", {
+				targetIndex,
+				attempt,
+				priorRequestCount: requestsBeforeClick
+			});
+			liveTarget.enrollmentButton.click();
+			const outcome = await waitForEnrollmentOutcome(requestsBeforeClick, dialogsBeforeClick);
+			diagnostics.log("target:request-outcome", {
+				targetIndex,
+				attempt,
+				outcome: outcome.type,
+				status: outcome.type === "request" ? outcome.status : null
+			});
+			if (outcome.type === "confirmation-required") return {
+				outcome: "aborted",
+				error: `${target.subjectCode}: Neptun registration confirmation popup is enabled`
+			};
+			if (outcome.type === "timeout") {
+				const confirmation = await confirmEnrollment(target.subjectCode, apiUsable, notificationStateBeforeClick, diagnostics);
+				if (confirmation === "registered") return {
+					outcome: "enrolled",
+					error: null
+				};
+				return {
+					outcome: confirmation === "rejected" ? "failed" : "unconfirmed",
+					error: `${target.subjectCode}: timed out waiting for Neptun`
+				};
+			}
+			if (outcome.status !== null && outcome.status >= 400) {
+				const notification = await waitForNewNotification(notificationStateBeforeClick);
+				const classification = classifyFailure(outcome.status, notification);
+				diagnostics.log("target:failure-classified", {
+					targetIndex,
+					attempt,
+					status: outcome.status,
+					classification
+				});
+				lastError = `${target.subjectCode}: server returned ${outcome.status}`;
+				if (classification === "run-fatal") return {
+					outcome: "run-fatal",
+					error: `${target.subjectCode}: Neptun reports there is no open registration period`
+				};
+				if (classification === "rejected") return {
+					outcome: "failed",
+					error: lastError
+				};
+				if (attempt < PLANNER_TIMING.enrollmentMaxAttempts) {
+					diagnostics.log("target:retry", {
+						targetIndex,
+						attempt,
+						status: outcome.status
+					});
+					await delay(PLANNER_TIMING.enrollmentRetryBaseDelayMs * attempt);
+				}
+				continue;
+			}
+			const confirmation = await confirmEnrollment(target.subjectCode, apiUsable, notificationStateBeforeClick, diagnostics);
+			if (confirmation === "registered") return {
+				outcome: "enrolled",
+				error: null
+			};
+			if (confirmation === "rejected") return {
+				outcome: "failed",
+				error: `${target.subjectCode}: Neptun reported enrollment failure`
+			};
+			return {
+				outcome: "unconfirmed",
+				error: `${target.subjectCode}: request completed but enrollment could not be confirmed`
+			};
+		}
+		return {
+			outcome: "failed",
+			error: lastError
+		};
+	}
+	async function runPlannerEnrollment(options) {
+		const api = getApi$1();
+		const diagnostics = createPlannerDiagnostics("enroll");
+		const readinessTimeoutMs = options.plannerWaitTimeoutMs ?? PLANNER_TIMING.interactiveReadinessTimeoutMs;
+		diagnostics.log("enroll:start", {
+			readinessTimeoutMs,
+			requestTimeoutMs: PLANNER_TIMING.enrollmentRequestTimeoutMs,
+			maxAttemptsPerSubject: PLANNER_TIMING.enrollmentMaxAttempts
+		});
+		const snapshot = await collectPlannerSnapshot({
+			entryPointTimeoutMs: readinessTimeoutMs,
+			contentTimeoutMs: readinessTimeoutMs,
+			diagnostics,
+			operation: "enroll"
+		});
+		const apiUsable = snapshot.plannedFromApi !== null;
+		const registeredCodes = new Set((snapshot.plannedFromApi ?? []).filter((subject) => subject.isRegistered).map((subject) => subject.code));
+		const eligibleTargets = snapshot.subjects.filter((subject) => subject.available && subject.enrollmentButton && !registeredCodes.has(subject.subjectCode));
+		const result = {
+			plannerReady: snapshot.preparation.root !== null && snapshot.contentReady,
+			openedPlanner: snapshot.preparation.openedPlanner,
+			listedSubjects: snapshot.listedSubjects,
+			plannedSubjects: snapshot.subjects.length,
+			eligibleSubjects: eligibleTargets.length,
+			attempted: 0,
+			enrolled: 0,
+			failed: 0,
+			skipped: snapshot.subjects.length - eligibleTargets.length,
+			unconfirmed: 0,
+			aborted: false,
+			errors: [...snapshot.issues]
+		};
+		diagnostics.log("enroll:targets", {
+			listedSubjects: result.listedSubjects,
+			readableSubjects: result.plannedSubjects,
+			eligibleSubjects: result.eligibleSubjects,
+			skippedSubjects: result.skipped,
+			alreadyRegistered: registeredCodes.size,
+			apiUsable
+		});
+		if (!snapshot.preparation.root || !snapshot.contentReady) {
+			diagnostics.log("enroll:blocked", { reason: "planner-not-ready" });
+			api?.statusPanel.addMessage("warn", `${snapshot.preparation.error ?? (snapshot.issues.join("; ") || "Neptun timetable planner list is unavailable.")} Console run: ${diagnostics.runId}.`);
+			return result;
+		}
+		if (eligibleTargets.length === 0) {
+			diagnostics.log("enroll:blocked", { reason: "no-eligible-targets" });
+			api?.statusPanel.addMessage("warn", registeredCodes.size > 0 && registeredCodes.size === snapshot.subjects.length ? `All ${registeredCodes.size} planned subjects are already registered. Nothing was clicked.` : `No enrollable planned subjects were found. Preview the planner and review unavailable items. Console run: ${diagnostics.runId}.`);
+			return result;
+		}
+		try {
+			if (!sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken)) {
+				result.aborted = true;
+				result.errors.push("Session expired");
+				diagnostics.log("enroll:blocked", { reason: "session-expired" });
+				api?.statusPanel.addMessage("error", `Session expired. Log in again before enrolling. Console run: ${diagnostics.runId}.`);
+				return result;
+			}
+		} catch (error) {
+			api?.logger.warn("cannot check sessionStorage before planner enrollment:", error);
+		}
+		if ((await fetchWarningModalStates().catch(() => null))?.scheduledCoursesInTimetableSuppressed === false) {
+			diagnostics.log("enroll:warning-modal-active");
+			api?.statusPanel.addMessage("warn", "Neptun’s registration confirmation popup is still enabled. If it appears, the run stops safely — tick “do not show again” in Neptun to avoid that.");
+		}
+		api?.statusPanel.expand();
+		api?.statusPanel.addMessage("info", `Enrolling ${eligibleTargets.length} planned subject${eligibleTargets.length === 1 ? "" : "s"} sequentially...`);
+		for (const [targetIndex, target] of eligibleTargets.entries()) {
+			if (!validateTarget(target)?.enrollmentButton) {
+				result.failed++;
+				result.errors.push(`${target.subjectCode}: planner selection changed before enrollment`);
+				diagnostics.log("target:skipped", {
+					targetIndex,
+					reason: "selection-changed"
+				});
+				continue;
+			}
+			result.attempted++;
+			api?.statusPanel.addMessage("info", `Enrolling ${target.subjectCode}... (${result.attempted}/${eligibleTargets.length})`);
+			const attemptResult = await enrollSingleSubject(target, apiUsable, diagnostics, targetIndex);
+			if (attemptResult.error) result.errors.push(attemptResult.error);
+			if (attemptResult.outcome === "enrolled") {
+				result.enrolled++;
+				continue;
+			}
+			if (attemptResult.outcome === "unconfirmed") {
+				result.unconfirmed++;
+				continue;
+			}
+			if (attemptResult.outcome === "run-fatal") {
+				result.failed++;
+				result.aborted = true;
+				api?.statusPanel.addMessage("error", `Neptun reports there is no open course registration period. Stopped after the first subject; the remaining ${eligibleTargets.length - result.attempted} were not clicked. Console run: ${diagnostics.runId}.`);
+				break;
+			}
+			if (attemptResult.outcome === "aborted") {
+				result.failed++;
+				result.aborted = true;
+				api?.statusPanel.addMessage("error", `Neptun opened a registration confirmation. Complete or cancel it manually, enable “do not show again,” then retry. Remaining subjects were not clicked. Console run: ${diagnostics.runId}.`);
+				break;
+			}
+			result.failed++;
+		}
+		const summary = `Planner enrollment: ${result.enrolled} enrolled, ${result.failed} failed, ${result.unconfirmed} unconfirmed, ${result.skipped} skipped.${result.aborted ? " Stopped safely." : ""}`;
+		const summaryWithRunId = `${summary} Console run: ${diagnostics.runId}.`;
+		diagnostics.log("enroll:complete", {
+			enrolled: result.enrolled,
+			failed: result.failed,
+			unconfirmed: result.unconfirmed,
+			skipped: result.skipped,
+			aborted: result.aborted
+		});
+		api?.logger.info(summary, result);
+		api?.statusPanel.addMessage(result.failed === 0 && result.unconfirmed === 0 && !result.aborted ? "info" : "warn", result.errors.length > 0 ? `${summaryWithRunId} ${result.errors.join("; ")}` : summaryWithRunId);
+		return result;
+	}
+	function enrollPlannedCourses(options = {}) {
+		if (plannerEnrollmentInFlight) return plannerEnrollmentInFlight;
+		if (getIsEnrolling()) return Promise.resolve(emptyResult("Enrollment is already in progress"));
+		setIsEnrolling(true);
+		const run = runPlannerEnrollment(options);
+		plannerEnrollmentInFlight = run;
+		const clearInFlight = () => {
+			if (plannerEnrollmentInFlight === run) plannerEnrollmentInFlight = null;
+			setIsEnrolling(false);
+		};
+		run.then(clearInFlight, clearInFlight);
+		return run;
+	}
+	var PREVIEW_STYLE_ID$1 = "npu-course-preview-style";
+	var PREVIEW_ATTRIBUTE$1 = "data-npu-course-preview";
+	var previewInFlight$1 = null;
+	var plannerPreviewInFlight = null;
+	function normalizeCode(code) {
+		return code.replace(/\s+/g, "").toUpperCase();
+	}
+	function ensurePreviewStyle$1() {
+		if (document.getElementById(PREVIEW_STYLE_ID$1)) return;
+		const style = document.createElement("style");
+		style.id = PREVIEW_STYLE_ID$1;
+		style.textContent = `
+    [${PREVIEW_ATTRIBUTE$1}="subject"] {
+      outline: 2px solid #4f8cff !important;
+      outline-offset: 2px !important;
+    }
+    [${PREVIEW_ATTRIBUTE$1}="unavailable-subject"] {
+      outline: 2px solid #d64545 !important;
+      outline-offset: 2px !important;
+    }
+    [${PREVIEW_ATTRIBUTE$1}="course"] {
+      box-shadow: inset 4px 0 0 #4f8cff !important;
+      background: rgba(79, 140, 255, 0.12) !important;
+    }
+    [${PREVIEW_ATTRIBUTE$1}="selected-course"] {
+      box-shadow: inset 4px 0 0 #22a06b !important;
+      background: rgba(34, 160, 107, 0.14) !important;
+    }
+    [${PREVIEW_ATTRIBUTE$1}="enrollment-button"] {
+      outline: 3px solid #ffb020 !important;
+      outline-offset: 2px !important;
+    }
+    [${PREVIEW_ATTRIBUTE$1}="unavailable-enrollment-button"] {
+      outline: 3px solid #d64545 !important;
+      outline-offset: 2px !important;
+    }
+  `;
+		document.head.appendChild(style);
+	}
+	function findEnrollmentButton(panel) {
+		return Array.from(panel.querySelectorAll("button")).find((button) => isEnrollButtonText(button.textContent ?? "")) ?? null;
+	}
+	function clearCoursePreview() {
+		document.querySelectorAll(`[${PREVIEW_ATTRIBUTE$1}]`).forEach((element) => {
+			element.removeAttribute(PREVIEW_ATTRIBUTE$1);
+		});
+	}
+	async function runCoursePreview() {
+		const api = getApi$1();
+		const selections = await loadSelections();
+		const entries = Object.entries(selections);
+		clearCoursePreview();
+		ensurePreviewStyle$1();
+		const result = {
+			savedSubjects: entries.length,
+			matchedSubjects: 0,
+			savedCourses: Object.values(selections).reduce((sum, codes) => sum + codes.length, 0),
+			matchedCourses: 0,
+			selectedCourses: 0,
+			enrollmentButtons: 0,
+			availableEnrollmentButtons: 0,
+			missing: []
+		};
+		if (entries.length === 0) {
+			api?.statusPanel.addMessage("info", "No saved courses to preview. No course selections or enrollment buttons were clicked.");
+			return result;
+		}
+		for (const [subjectCode, courseCodes] of entries) {
+			const panel = findSubjectPanel(subjectCode);
+			if (!panel) {
+				result.missing.push(`${subjectCode}: subject not visible`);
+				continue;
+			}
+			result.matchedSubjects++;
+			panel.setAttribute(PREVIEW_ATTRIBUTE$1, "subject");
+			if (!await expandPanel(panel)) {
+				result.missing.push(`${subjectCode}: subject panel could not be expanded`);
+				continue;
+			}
+			const livePanel = findSubjectPanel(subjectCode) ?? panel;
+			livePanel.setAttribute(PREVIEW_ATTRIBUTE$1, "subject");
+			const items = getCourseItems(livePanel);
+			for (const courseCode of courseCodes) {
+				const normalizedSavedCode = normalizeCode(courseCode);
+				const item = items.find((candidate) => {
+					const visibleCode = extractCourseCode(candidate);
+					return visibleCode !== null && normalizeCode(visibleCode) === normalizedSavedCode;
+				});
+				if (!item) {
+					result.missing.push(`${subjectCode}: ${courseCode} not visible`);
+					continue;
+				}
+				result.matchedCourses++;
+				if (isCourseSelected(item)) {
+					result.selectedCourses++;
+					item.setAttribute(PREVIEW_ATTRIBUTE$1, "selected-course");
+				} else item.setAttribute(PREVIEW_ATTRIBUTE$1, "course");
+			}
+			const enrollmentButton = findEnrollmentButton(livePanel);
+			if (!enrollmentButton) {
+				result.missing.push(`${subjectCode}: enrollment button not visible`);
+				continue;
+			}
+			result.enrollmentButtons++;
+			if (isElementAvailable(enrollmentButton)) {
+				result.availableEnrollmentButtons++;
+				enrollmentButton.setAttribute(PREVIEW_ATTRIBUTE$1, "enrollment-button");
+			} else {
+				enrollmentButton.setAttribute(PREVIEW_ATTRIBUTE$1, "unavailable-enrollment-button");
+				result.missing.push(`${subjectCode}: enrollment button unavailable`);
+			}
+		}
+		api?.logger.info("course preview result", result);
+		api?.statusPanel.addMessage(result.missing.length === 0 ? "info" : "warn", `Preview: ${result.matchedCourses}/${result.savedCourses} saved courses matched; ${result.availableEnrollmentButtons}/${result.enrollmentButtons} enrollment buttons available. No course selections or enrollment buttons were clicked.`);
+		return result;
+	}
+	function previewSavedCourses() {
+		if (previewInFlight$1) return previewInFlight$1;
+		const run = runCoursePreview();
+		previewInFlight$1 = run;
+		const clearInFlight = () => {
+			if (previewInFlight$1 === run) previewInFlight$1 = null;
+		};
+		run.then(clearInFlight, clearInFlight);
+		return run;
+	}
+	async function runPlannerPreview() {
+		const api = getApi$1();
+		clearCoursePreview();
+		ensurePreviewStyle$1();
+		const diagnostics = createPlannerDiagnostics("preview");
+		diagnostics.log("preview:start");
+		const snapshot = await collectPlannerSnapshot({
+			diagnostics,
+			operation: "preview"
+		});
+		const result = {
+			diagnosticRunId: snapshot.diagnosticRunId,
+			contentReady: snapshot.contentReady,
+			plannedSubjects: snapshot.subjects.length,
+			plannedCourses: snapshot.subjects.reduce((sum, subject) => sum + subject.courseCodes.length, 0),
+			enrollableSubjects: snapshot.subjects.filter((subject) => subject.available).length,
+			unavailableSubjects: snapshot.subjects.filter((subject) => !subject.available).length,
+			openedPlanner: snapshot.preparation.openedPlanner,
+			switchedToList: snapshot.preparation.switchedToList,
+			issues: snapshot.issues
+		};
+		for (const subject of snapshot.subjects) {
+			subject.panel.setAttribute(PREVIEW_ATTRIBUTE$1, subject.available ? "subject" : "unavailable-subject");
+			subject.selectedCourseItems.forEach((item) => {
+				item.setAttribute(PREVIEW_ATTRIBUTE$1, "selected-course");
+			});
+			if (subject.enrollmentButton) subject.enrollmentButton.setAttribute(PREVIEW_ATTRIBUTE$1, subject.available ? "enrollment-button" : "unavailable-enrollment-button");
+		}
+		api?.logger.info("planner preview result", result);
+		diagnostics.log("preview:complete", {
+			contentReady: result.contentReady,
+			plannedSubjects: result.plannedSubjects,
+			plannedCourses: result.plannedCourses,
+			enrollableSubjects: result.enrollableSubjects,
+			issueCount: result.issues.length
+		});
+		if (!result.contentReady) {
+			api?.statusPanel.addMessage("warn", `Planner preview could not read a fully loaded subject list: ${result.issues.join("; ")}. No course, planner-selection, or enrollment controls were clicked. Console run: ${result.diagnosticRunId}.`);
+			return result;
+		}
+		api?.statusPanel.addMessage(result.issues.length === 0 ? "info" : "warn", `Planner preview: ${result.enrollableSubjects}/${result.plannedSubjects} subjects ready; ${result.plannedCourses} planned courses found. Only planner view controls and subject headers may have been opened. No course, planner-selection, or enrollment controls were clicked. Console run: ${result.diagnosticRunId}.`);
+		return result;
+	}
+	function previewPlannedCourses() {
+		if (plannerPreviewInFlight) return plannerPreviewInFlight;
+		const run = runPlannerPreview();
+		plannerPreviewInFlight = run;
+		const clearInFlight = () => {
+			if (plannerPreviewInFlight === run) plannerPreviewInFlight = null;
+		};
+		run.then(clearInFlight, clearInFlight);
+		return run;
+	}
+	var COURSE_UI_BUILD = "3.4.0 planner-first";
 	async function renderModuleUI$1() {
 		const api = getApi$1();
 		if (!api) return;
+		clearCoursePreview();
 		const container = document.createElement("div");
 		const debugEnabled = isDebugEnabled();
 		const titleDiv = document.createElement("div");
@@ -2690,9 +3857,35 @@ mat-expansion-panel {
   `;
 		const btnContainer = document.createElement("div");
 		btnContainer.style.cssText = "display: flex; flex-wrap: wrap; gap: 5px;";
+		const plannerPreviewBtn = document.createElement("button");
+		plannerPreviewBtn.style.cssText = `${btnStyle} background: #37474f; color: white;`;
+		plannerPreviewBtn.textContent = "Preview Planner";
+		plannerPreviewBtn.title = "Open Neptun timetable planner list view and highlight its exact planned courses without changing selections or enrolling";
+		plannerPreviewBtn.addEventListener("click", () => {
+			previewPlannedCourses().catch((err) => api?.logger.error("planner preview failed:", err));
+		});
+		btnContainer.appendChild(plannerPreviewBtn);
+		const plannerEnrollBtn = document.createElement("button");
+		plannerEnrollBtn.style.cssText = `${btnStyle} background: #d84315; color: white; font-weight: bold;`;
+		plannerEnrollBtn.textContent = "Enroll Planner";
+		plannerEnrollBtn.title = "Immediately revalidate the exact timetable-planner courses, then click every valid visible enrollment button sequentially";
+		plannerEnrollBtn.addEventListener("click", () => {
+			if (getIsEnrolling()) return;
+			enrollPlannedCourses().catch((err) => api?.logger.error("planner enrollment failed:", err));
+		});
+		btnContainer.appendChild(plannerEnrollBtn);
+		const clearPreviewBtn = document.createElement("button");
+		clearPreviewBtn.style.cssText = `${btnStyle} background: #455a64; color: white;`;
+		clearPreviewBtn.textContent = "Clear Preview";
+		clearPreviewBtn.addEventListener("click", () => {
+			clearCoursePreview();
+			api.statusPanel.addMessage("info", "Course preview cleared.");
+		});
+		btnContainer.appendChild(clearPreviewBtn);
 		const saveBtn = document.createElement("button");
 		saveBtn.style.cssText = `${btnStyle} background: #1565c0; color: white;`;
-		saveBtn.textContent = "Save";
+		saveBtn.textContent = "Save Local";
+		saveBtn.title = "Save selections from the currently loaded subject list as a local fallback";
 		saveBtn.addEventListener("click", () => {
 			saveCurrentSelections().catch((err) => api?.logger.error("save selections failed:", err));
 		});
@@ -2735,10 +3928,18 @@ mat-expansion-panel {
 				loadStoredSelections().catch((err) => api?.logger.error("load selections failed:", err));
 			});
 			btnContainer.appendChild(loadBtn);
+			const previewBtn = document.createElement("button");
+			previewBtn.style.cssText = `${btnStyle} background: #37474f; color: white;`;
+			previewBtn.textContent = "Preview Saved";
+			previewBtn.title = "Expand saved subjects and highlight matches without clicking course or enrollment controls";
+			previewBtn.addEventListener("click", () => {
+				previewSavedCourses().catch((err) => api?.logger.error("course preview failed:", err));
+			});
+			btnContainer.appendChild(previewBtn);
 			const loadEnrollBtn = document.createElement("button");
-			loadEnrollBtn.style.cssText = `${btnStyle} background: #d84315; color: white; font-weight: bold;`;
-			loadEnrollBtn.textContent = "Load + Enroll";
-			loadEnrollBtn.title = "Load saved courses, then enroll each subject";
+			loadEnrollBtn.style.cssText = `${btnStyle} background: #ad451e; color: white;`;
+			loadEnrollBtn.textContent = "Local Load + Enroll";
+			loadEnrollBtn.title = "Fallback: load locally saved courses from the subject list, then enroll each subject";
 			loadEnrollBtn.addEventListener("click", () => {
 				if (getIsEnrolling()) return;
 				loadAndEnroll().catch((err) => api?.logger.error("load & enroll failed:", err));
@@ -2764,7 +3965,7 @@ mat-expansion-panel {
 		container.appendChild(btnContainer);
 		const hint = document.createElement("div");
 		hint.style.cssText = "margin-top: 6px; font-size: 10px; color: #6a7a8a;";
-		hint.textContent = "Expand subjects and select courses before saving.";
+		hint.textContent = "Primary workflow: put exact courses in Neptun’s timetable planner, then Preview Planner. Enroll Planner starts immediately, never changes planner/course selections, and continues through every still-valid subject. Disable Neptun’s own registration popup first. Privacy-safe diagnostics are always logged under [NPU:planner]. Local buttons are the fallback.";
 		container.appendChild(hint);
 		if (debugEnabled) {
 			const diagnosticsDiv = document.createElement("div");
@@ -2781,9 +3982,37 @@ mat-expansion-panel {
 	async function handleClear() {
 		const api = getApi$1();
 		await clearSelections();
+		clearCoursePreview();
 		api?.logger.info("cleared all stored course selections");
 		api?.statusPanel.addMessage("info", "All stored selections cleared.");
 		await renderModuleUI$1();
+	}
+	async function runLocalSavedRushFallback(api) {
+		api.statusPanel.addMessage("info", "Neptun timetable planner is empty. Trying locally saved courses as the fallback...");
+		const autoSearchResult = await autoSearchSubjects();
+		let panelCount = getSubjectPanels().length;
+		if (panelCount === 0) {
+			const listingResult = await waitForSubjectListing({
+				timeoutMs: PLANNER_TIMING.rushReadinessTimeoutMs,
+				searchStartedAtMs: autoSearchResult.searchStartedAtMs ?? performance.now(),
+				allowAutoClick: !autoSearchResult.clickedSearchButton
+			});
+			panelCount = listingResult.panels;
+			if (panelCount === 0) {
+				if (listingResult.state === "request-failed" && listingResult.requestStatus !== null) {
+					api.logger.warn(`Rush Mode: subject search failed with status ${listingResult.requestStatus}`);
+					api.statusPanel.addMessage("warn", `Subject search failed (${listingResult.requestStatus}). Registration may not be open yet.`);
+				} else if (listingResult.state === "request-completed-no-panels") {
+					api.logger.warn("Rush Mode: subject search completed but no subjects were listed");
+					api.statusPanel.addMessage("warn", "Subject search completed, but no subjects were listed. Check filters or registration availability.");
+				} else {
+					api.logger.warn("Rush Mode: timed out waiting for subject listing - cannot auto-enroll");
+					api.statusPanel.addMessage("warn", "Timed out waiting for subjects to load. Try refreshing and enabling Rush Mode again.");
+				}
+				return;
+			}
+		}
+		await loadAndEnroll();
 	}
 	var courseStoreModule = {
 		id: "course-store",
@@ -2820,48 +4049,27 @@ mat-expansion-panel {
 					});
 				}
 			}));
-			const autoSearchResult = await autoSearchSubjects();
 			if (api.statusPanel.getCourseRushMode()) {
-				const rushSelections = await loadSelections();
-				if (Object.keys(rushSelections).length > 0) {
-					api.logger.info("Course Rush Mode active - auto-triggering Load & Enroll");
-					api.statusPanel.addMessage("info", "Course Rush is enrolling saved courses...");
-					api.statusPanel.setCourseRushMode(false);
-					api.statusPanel.addMessage("info", "Course Rush started and turned itself off.");
-					let panelCount = getSubjectPanels().length;
-					if (panelCount === 0) {
-						const listingResult = await waitForSubjectListing({
-							timeoutMs: 6e4,
-							searchStartedAtMs: autoSearchResult.searchStartedAtMs ?? performance.now(),
-							allowAutoClick: !autoSearchResult.clickedSearchButton
-						});
-						panelCount = listingResult.panels;
-						if (panelCount === 0) {
-							if (listingResult.state === "request-failed" && listingResult.requestStatus !== null) {
-								api.logger.warn(`Rush Mode: subject search failed with status ${listingResult.requestStatus}`);
-								api.statusPanel.addMessage("warn", `Subject search failed (${listingResult.requestStatus}). Registration may not be open yet.`);
-							} else if (listingResult.state === "request-completed-no-panels") {
-								api.logger.warn("Rush Mode: subject search completed but no subjects were listed");
-								api.statusPanel.addMessage("warn", "Subject search completed, but no subjects were listed. Check filters or registration availability.");
-							} else {
-								api.logger.warn("Rush Mode: timed out waiting for subject listing - cannot auto-enroll");
-								api.statusPanel.addMessage("warn", "Timed out waiting for subjects to load. Try refreshing and enabling Rush Mode again.");
-							}
-							return;
-						}
+				api.logger.info("Course Rush Mode active - using Neptun timetable planner first");
+				await api.statusPanel.setCourseRushMode(false);
+				api.statusPanel.addMessage("info", "Course Rush started and turned itself off. Waiting for Neptun timetable planner...");
+				const plannerResult = await enrollPlannedCourses({ plannerWaitTimeoutMs: PLANNER_TIMING.rushReadinessTimeoutMs });
+				if (!plannerResult.plannerReady) api.statusPanel.addMessage("warn", "Neptun timetable planner did not become ready. Local fallback was not started automatically; nothing else was clicked.");
+				else if (plannerResult.listedSubjects === 0 && plannerResult.plannedSubjects === 0 && plannerResult.attempted === 0 && !plannerResult.aborted) {
+					const rushSelections = await loadSelections();
+					if (Object.keys(rushSelections).length > 0) if (plannerResult.openedPlanner && closePlannerSafely()) await runLocalSavedRushFallback(api);
+					else {
+						api.logger.warn("Rush Mode: planner was already open and empty; local fallback was not started automatically");
+						api.statusPanel.addMessage("warn", "Planner is empty, but it was already open. Close it and use Local Load + Enroll for the saved fallback.");
 					}
-					if (panelCount === 0) {
-						api.logger.warn("Rush Mode: no subjects are listed - cannot auto-enroll");
-						api.statusPanel.addMessage("warn", "No subjects loaded. Try refreshing and enabling Rush Mode again.");
-						return;
-					}
-					loadAndEnroll().catch((err) => api.logger.error("rush auto-enroll failed:", err));
+					else api.statusPanel.addMessage("warn", "No planned subjects or locally saved fallback courses were found. Nothing was clicked.");
 				}
-			}
+			} else await autoSearchSubjects();
 			api.logger.info("initialized on registration page");
 		},
 		dispose() {
 			setIsEnrolling(false);
+			clearCoursePreview();
 			getRouteUnsub()?.();
 			setRouteUnsub(null);
 			setApi$1(null);
@@ -3527,7 +4735,7 @@ mat-expansion-panel {
 				return;
 			}
 			api?.statusPanel.addMessage("info", `Exam Rush: ${targets.length} saved target${targets.length === 1 ? "" : "s"} visible.`);
-			api?.statusPanel.setExamRushMode(false);
+			await api?.statusPanel.setExamRushMode(false);
 			api?.statusPanel.addMessage("info", "Exam Rush started and turned itself off.");
 			let failedCount = 0;
 			let submittedCount = 0;
@@ -3821,7 +5029,100 @@ mat-expansion-panel {
 		renderDetails();
 		return root;
 	}
-	var EXAM_UI_BUILD = "3.2.0 exam-calendar";
+	var PREVIEW_STYLE_ID = "npu-exam-preview-style";
+	var PREVIEW_ATTRIBUTE = "data-npu-exam-preview";
+	var previewInFlight = null;
+	function ensurePreviewStyle() {
+		if (document.getElementById(PREVIEW_STYLE_ID)) return;
+		const style = document.createElement("style");
+		style.id = PREVIEW_STYLE_ID;
+		style.textContent = `
+    [${PREVIEW_ATTRIBUTE}="row"] {
+      box-shadow: inset 4px 0 0 #4f8cff !important;
+      background: rgba(79, 140, 255, 0.12) !important;
+    }
+    [${PREVIEW_ATTRIBUTE}="enrollment-button"] {
+      outline: 3px solid #ffb020 !important;
+      outline-offset: 2px !important;
+    }
+    [${PREVIEW_ATTRIBUTE}="unavailable-row"] {
+      box-shadow: inset 4px 0 0 #d64545 !important;
+      background: rgba(214, 69, 69, 0.12) !important;
+    }
+    [${PREVIEW_ATTRIBUTE}="unavailable-enrollment-button"] {
+      outline: 3px solid #d64545 !important;
+      outline-offset: 2px !important;
+    }
+  `;
+		document.head.appendChild(style);
+	}
+	function clearExamPreview() {
+		document.querySelectorAll(`[${PREVIEW_ATTRIBUTE}]`).forEach((element) => {
+			element.removeAttribute(PREVIEW_ATTRIBUTE);
+		});
+	}
+	async function runExamPreview() {
+		const api = getApi();
+		const preferences = await loadPreferences();
+		const entries = Object.entries(preferences);
+		clearExamPreview();
+		ensurePreviewStyle();
+		const result = {
+			savedExams: entries.length,
+			matchedExams: 0,
+			availableExams: 0,
+			matchedRows: 0,
+			enrollmentButtons: 0,
+			availableEnrollmentButtons: 0,
+			missing: []
+		};
+		if (entries.length === 0) {
+			api?.statusPanel.addMessage("info", "No saved exams to preview. No clicks were made.");
+			return result;
+		}
+		const tableSubjectCodes = buildTableSubjectCodeMap();
+		const pageSubjectCode = getSubjectCode();
+		const matchedSubjects = new Set();
+		const availableSubjects = new Set();
+		for (const row of getExamRows()) {
+			const subjectCode = getRowSubjectCode(row, tableSubjectCodes) ?? pageSubjectCode;
+			if (!subjectCode) continue;
+			const preference = preferences[subjectCode];
+			if (!preference) continue;
+			const info = parseExamRow(row);
+			if (info.date !== preference.date) continue;
+			matchedSubjects.add(subjectCode);
+			result.matchedRows++;
+			if (info.felvetelBtn) result.enrollmentButtons++;
+			if (info.felvetelBtn && isElementAvailable(info.felvetelBtn)) {
+				result.availableEnrollmentButtons++;
+				availableSubjects.add(subjectCode);
+				row.setAttribute(PREVIEW_ATTRIBUTE, "row");
+				info.felvetelBtn.setAttribute(PREVIEW_ATTRIBUTE, "enrollment-button");
+			} else {
+				row.setAttribute(PREVIEW_ATTRIBUTE, "unavailable-row");
+				info.felvetelBtn?.setAttribute(PREVIEW_ATTRIBUTE, "unavailable-enrollment-button");
+			}
+		}
+		for (const [subjectCode, preference] of entries) if (!matchedSubjects.has(subjectCode)) result.missing.push(`${subjectCode}: ${preference.date} not visible`);
+		else if (!availableSubjects.has(subjectCode)) result.missing.push(`${subjectCode}: ${preference.date} has no available enrollment button`);
+		result.matchedExams = matchedSubjects.size;
+		result.availableExams = availableSubjects.size;
+		api?.logger.info("exam preview result", result);
+		api?.statusPanel.addMessage(result.missing.length === 0 ? "info" : "warn", `Preview: ${result.matchedExams}/${result.savedExams} saved exams matched; ${result.availableEnrollmentButtons}/${result.enrollmentButtons} enrollment buttons available. No clicks were made.`);
+		return result;
+	}
+	function previewSavedExams() {
+		if (previewInFlight) return previewInFlight;
+		const run = runExamPreview();
+		previewInFlight = run;
+		const clearInFlight = () => {
+			if (previewInFlight === run) previewInFlight = null;
+		};
+		run.then(clearInFlight, clearInFlight);
+		return run;
+	}
+	var EXAM_UI_BUILD = "3.3.0 safe-preview";
 	async function savePreferredExam(subjectCode, date, type, courseCode) {
 		const api = getApi();
 		const prefs = await loadPreferences();
@@ -3843,11 +5144,13 @@ mat-expansion-panel {
 		api?.logger.info(`cleared exam preference for ${subjectCode}`);
 		api?.statusPanel.addMessage("info", "Saved exam date cleared.");
 		clearHighlights();
+		clearExamPreview();
 		await renderModuleUI();
 	}
 	async function renderModuleUI() {
 		const api = getApi();
 		if (!api) return;
+		clearExamPreview();
 		const container = document.createElement("div");
 		container.style.cssText = "font-size: 12px;";
 		const debugEnabled = isDebugEnabled();
@@ -3894,6 +5197,28 @@ mat-expansion-panel {
 			container.appendChild(infoDiv);
 		}
 		const allPrefsEntries = Object.entries(prefs);
+		if (allPrefsEntries.length > 0) {
+			const previewBtn = document.createElement("button");
+			previewBtn.style.cssText = `${btnStyle} background: #37474f; color: white;`;
+			previewBtn.textContent = "Preview Saved";
+			previewBtn.title = "Highlight saved exam matches and enrollment buttons without clicking";
+			previewBtn.addEventListener("click", () => {
+				previewSavedExams().catch((err) => api?.logger.error("exam preview failed:", err));
+			});
+			container.appendChild(previewBtn);
+			const clearPreviewBtn = document.createElement("button");
+			clearPreviewBtn.style.cssText = `${btnStyle} background: #455a64; color: white;`;
+			clearPreviewBtn.textContent = "Clear Preview";
+			clearPreviewBtn.addEventListener("click", () => {
+				clearExamPreview();
+				api.statusPanel.addMessage("info", "Exam preview cleared.");
+			});
+			container.appendChild(clearPreviewBtn);
+			const previewHint = document.createElement("div");
+			previewHint.style.cssText = "margin-top: 4px; font-size: 10px; color: #6a7a8a;";
+			previewHint.textContent = "Preview only highlights matches; it never clicks enrollment buttons.";
+			container.appendChild(previewHint);
+		}
 		const calendar = renderExamCalendar(buildRegisteredExamCalendarEntries(getExamRows().map((row) => ({
 			info: parseExamRow(row),
 			subjectCode: getRowSubjectCode(row) ?? subjectCode
@@ -3998,6 +5323,7 @@ mat-expansion-panel {
 			}
 			getTableObserver()?.disconnect();
 			setTableObserver(null);
+			clearExamPreview();
 			clearHighlights();
 			document.querySelectorAll(".npu-exam-save-btn").forEach((b) => b.remove());
 			document.querySelectorAll(".npu-exam-save-slot").forEach((slot) => slot.remove());
@@ -4246,6 +5572,63 @@ mat-expansion-panel {
 			declineBtn.addEventListener("click", () => cleanup(false));
 		});
 	}
+	var RUSH_PATHS = {
+		course: "subjects/registration",
+		exam: "exams/overview/registration"
+	};
+	var REDIRECT_COUNT_KEY = "npu:rushRedirectCount";
+	var MAX_REDIRECTS = 2;
+	function hasAccessToken() {
+		try {
+			return Boolean(sessionStorage.getItem(SESSION_STORAGE_KEYS.accessToken));
+		} catch {
+			return false;
+		}
+	}
+	function getPortalPrefix(pathname = window.location.pathname) {
+		return pathname.split("/")[1] || "hallgatoi";
+	}
+	function buildRushUrl(kind, pathname, origin) {
+		return `${origin}/${getPortalPrefix(pathname)}/${RUSH_PATHS[kind]}`;
+	}
+	function isOnRushPage(kind, path) {
+		return path.includes(`/${RUSH_PATHS[kind]}`);
+	}
+	function isOnLoginPage(path) {
+		return path.endsWith("/login") || path === "/login";
+	}
+	function readRedirectCount() {
+		try {
+			const raw = sessionStorage.getItem(REDIRECT_COUNT_KEY);
+			const parsed = raw === null ? 0 : Number.parseInt(raw, 10);
+			return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+		} catch {
+			return 0;
+		}
+	}
+	function noteRedirect() {
+		try {
+			sessionStorage.setItem(REDIRECT_COUNT_KEY, String(readRedirectCount() + 1));
+		} catch {}
+	}
+	function clearRedirectBudget() {
+		try {
+			sessionStorage.removeItem(REDIRECT_COUNT_KEY);
+		} catch {}
+	}
+	function decideRushRedirect(kind, path, authenticated, redirectCount = readRedirectCount(), origin = window.location.origin) {
+		if (isOnRushPage(kind, path)) return { action: "already-there" };
+		if (!authenticated || isOnLoginPage(path)) return { action: "wait-for-login" };
+		if (redirectCount >= MAX_REDIRECTS) return { action: "budget-exhausted" };
+		return {
+			action: "navigate",
+			url: buildRushUrl(kind, path, origin)
+		};
+	}
+	function performRushRedirect(url) {
+		noteRedirect();
+		window.location.href = url;
+	}
 	async function main() {
 		const logger = createLogger("core");
 		if (!isLikelyNeptunPortal()) return;
@@ -4289,13 +5672,21 @@ mat-expansion-panel {
 		const themeInitial = await rushStorage.getForDomain("themeSettings") ?? { ...DEFAULT_THEME };
 		logger.info(`rush mode initial state — course: ${courseRushInitial}, exam: ${examRushInitial}`);
 		const statusPanel = createStatusPanel(bus, {
-			onCourseRushChange: (on) => {
-				rushStorage.set("courseRushMode", on).catch((err) => logger.error("failed to persist courseRushMode:", err));
+			onCourseRushChange: async (on) => {
+				try {
+					await rushStorage.set("courseRushMode", on);
+				} catch (err) {
+					logger.error("failed to persist courseRushMode:", err);
+				}
 				logger.info(`Course Rush Mode ${on ? "ON" : "OFF"}`);
 				statusPanel.addMessage("info", `Course Rush ${on ? "on" : "off"}`);
 			},
-			onExamRushChange: (on) => {
-				rushStorage.set("examRushMode", on).catch((err) => logger.error("failed to persist examRushMode:", err));
+			onExamRushChange: async (on) => {
+				try {
+					await rushStorage.set("examRushMode", on);
+				} catch (err) {
+					logger.error("failed to persist examRushMode:", err);
+				}
 				logger.info(`Exam Rush Mode ${on ? "ON" : "OFF"}`);
 				statusPanel.addMessage("info", `Exam Rush ${on ? "on" : "off"}`);
 			},
@@ -4320,31 +5711,49 @@ mat-expansion-panel {
 		registry.register(examSignupModule);
 		registry.register(pinkModeModule);
 		await registry.activateAll(buildContext());
-		let lastPath = extractPath(window.location.href);
-		observeRouteChanges(bus);
-		bus.on("page:changed", async (payload) => {
-			logger.info(`route changed: ${window.location.pathname}`);
-			const previousPath = lastPath;
-			lastPath = payload.path;
-			if ((previousPath === "/login" || previousPath.endsWith("/login")) && !payload.path.includes("/login")) {
-				const courseRush = statusPanel.getCourseRushMode();
-				const examRush = statusPanel.getExamRushMode();
-				if (courseRush) {
-					logger.info("Course Rush Mode: redirecting to registration page after login");
-					statusPanel.addMessage("info", "Opening course registration for Course Rush...");
-					registry.disposeAll();
-					const pathPrefix = window.location.pathname.split("/")[1] || "hallgatoi";
-					window.location.href = `${window.location.origin}/${pathPrefix}/subjects/registration`;
-					return;
-				} else if (examRush) {
-					logger.info("Exam Rush Mode: redirecting to exam overview after login");
-					statusPanel.addMessage("info", "Opening exam overview for Exam Rush...");
-					registry.disposeAll();
-					const pathPrefix = window.location.pathname.split("/")[1] || "hallgatoi";
-					window.location.href = `${window.location.origin}/${pathPrefix}/exams/overview/registration`;
-					return;
-				}
+		function tryRushRedirect(kind, reason) {
+			const path = extractPath(window.location.href);
+			const decision = decideRushRedirect(kind, path, hasAccessToken());
+			if (decision.action === "already-there") {
+				clearRedirectBudget();
+				return false;
 			}
+			if (decision.action === "budget-exhausted") {
+				logger.warn(`${kind} rush: redirect budget exhausted, staying on ${path}`);
+				statusPanel.addMessage("warn", `Could not reach the ${kind === "course" ? "course registration" : "exam"} page automatically. Open it manually and re-enable the rush.`);
+				return false;
+			}
+			if (decision.action === "wait-for-login") return false;
+			logger.info(`${kind} rush: navigating to rush page (${reason})`);
+			statusPanel.addMessage("info", `Opening ${kind === "course" ? "course registration" : "exam overview"} for ${kind === "course" ? "Course" : "Exam"} Rush...`);
+			registry.disposeAll();
+			performRushRedirect(decision.url);
+			return true;
+		}
+		function armedRushKind() {
+			if (statusPanel.getCourseRushMode()) return "course";
+			if (statusPanel.getExamRushMode()) return "exam";
+			return null;
+		}
+		const initialRush = armedRushKind();
+		if (initialRush) {
+			if (isOnRushPage(initialRush, extractPath(window.location.href))) clearRedirectBudget();
+			else if (!tryRushRedirect(initialRush, "page load")) {
+				const stopWaiting = bus.on("token:acquired", () => {
+					const kind = armedRushKind();
+					if (!kind) {
+						stopWaiting();
+						return;
+					}
+					if (tryRushRedirect(kind, "token acquired")) stopWaiting();
+				});
+			}
+		} else clearRedirectBudget();
+		observeRouteChanges(bus);
+		bus.on("page:changed", async () => {
+			logger.info(`route changed: ${window.location.pathname}`);
+			const rushKind = armedRushKind();
+			if (rushKind && tryRushRedirect(rushKind, "route change")) return;
 			registry.disposeAll();
 			await registry.activateAll(buildContext());
 		});

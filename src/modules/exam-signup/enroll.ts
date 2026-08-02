@@ -429,7 +429,8 @@ export async function autoEnrollSaved(): Promise<void> {
       'info',
       `Exam Rush: ${targets.length} saved target${targets.length === 1 ? '' : 's'} visible.`,
     )
-    api?.statusPanel.setExamRushMode(false)
+    // Disarm durably *before* acting, so a reload mid-run cannot start a second rush.
+    await api?.statusPanel.setExamRushMode(false)
     api?.statusPanel.addMessage('info', 'Exam Rush started and turned itself off.')
 
     let failedCount = 0
