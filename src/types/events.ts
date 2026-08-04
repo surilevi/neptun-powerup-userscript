@@ -43,6 +43,7 @@ export interface NpuEventMap {
   'token:expired': Record<string, never>
   'page:changed': PageChangedPayload
   'module:error': ModuleErrorPayload
+  'saved-choices:restored': Record<string, never>
 }
 
 export type NpuEventName = keyof NpuEventMap

@@ -119,6 +119,7 @@
 				await gm.setValue("npu3", JSON.stringify(data));
 			} catch (err) {
 				console.error("[NPU:storage] failed to save data:", err);
+				throw err;
 			}
 		}
 		function updateAll(mutator) {
@@ -150,6 +151,13 @@
 				await updateAll((data) => {
 					const domainData = data[`domain:${domain}`] ?? {};
 					domainData[key] = value;
+					data[`domain:${domain}`] = domainData;
+				});
+			},
+			async setForDomainValues(values) {
+				await updateAll((data) => {
+					const domainData = data[`domain:${domain}`] ?? {};
+					Object.assign(domainData, values);
 					data[`domain:${domain}`] = domainData;
 				});
 			}
@@ -854,6 +862,73 @@ mat-expansion-panel {
 			});
 			themeRow.appendChild(colorRow);
 			container.appendChild(themeRow);
+			if (rushCallbacks?.onExportSavedChoices || rushCallbacks?.onImportSavedChoices) {
+				const dataHeader = document.createElement("div");
+				dataHeader.style.cssText = `color: ${COLORS.accent}; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 16px; margin-bottom: 8px; padding-top: 12px; border-top: 1px solid ${COLORS.border};`;
+				dataHeader.textContent = "Saved choices";
+				container.appendChild(dataHeader);
+				const dataNote = document.createElement("div");
+				dataNote.style.cssText = `font-size: 10px; color: ${COLORS.textMuted}; margin-bottom: 8px;`;
+				dataNote.textContent = "Back up or replace the saved course and exam choices for this Neptun domain.";
+				container.appendChild(dataNote);
+				const dataActions = document.createElement("div");
+				dataActions.style.cssText = "display: flex; gap: 6px;";
+				container.appendChild(dataActions);
+				const dataStatus = document.createElement("div");
+				dataStatus.id = "npu-saved-choices-status";
+				dataStatus.setAttribute("aria-live", "polite");
+				dataStatus.style.cssText = `font-size: 10px; color: ${COLORS.textMuted}; margin-top: 6px; min-height: 14px;`;
+				container.appendChild(dataStatus);
+				async function runDataAction(button, pendingLabel, action) {
+					const originalLabel = button.textContent ?? "";
+					const actionButtons = Array.from(dataActions.querySelectorAll("button"));
+					for (const actionButton of actionButtons) {
+						actionButton.disabled = true;
+						actionButton.style.opacity = "0.7";
+					}
+					button.textContent = pendingLabel;
+					dataStatus.textContent = "";
+					try {
+						const message = await action();
+						if (message) {
+							dataStatus.style.color = COLORS.green;
+							dataStatus.textContent = message;
+						}
+					} catch (err) {
+						dataStatus.style.color = COLORS.red;
+						dataStatus.textContent = err instanceof Error ? err.message : String(err);
+					} finally {
+						for (const actionButton of actionButtons) {
+							actionButton.disabled = false;
+							actionButton.style.opacity = "1";
+						}
+						button.textContent = originalLabel;
+					}
+				}
+				const dataButtonStyle = `flex: 1; padding: 5px 8px; background: transparent; color: ${COLORS.text}; border: 1px solid ${COLORS.border}; border-radius: 4px; cursor: pointer; font-size: 11px;`;
+				if (rushCallbacks.onExportSavedChoices) {
+					const exportBtn = document.createElement("button");
+					exportBtn.id = "npu-export-saved-choices";
+					exportBtn.type = "button";
+					exportBtn.style.cssText = dataButtonStyle;
+					exportBtn.textContent = "Export JSON";
+					exportBtn.addEventListener("click", () => {
+						runDataAction(exportBtn, "Exporting...", rushCallbacks.onExportSavedChoices).catch(() => void 0);
+					});
+					dataActions.appendChild(exportBtn);
+				}
+				if (rushCallbacks.onImportSavedChoices) {
+					const importBtn = document.createElement("button");
+					importBtn.id = "npu-import-saved-choices";
+					importBtn.type = "button";
+					importBtn.style.cssText = dataButtonStyle;
+					importBtn.textContent = "Import JSON";
+					importBtn.addEventListener("click", () => {
+						runDataAction(importBtn, "Importing...", rushCallbacks.onImportSavedChoices).catch(() => void 0);
+					});
+					dataActions.appendChild(importBtn);
+				}
+			}
 			const legalHeader = document.createElement("div");
 			legalHeader.style.cssText = `color: ${COLORS.accent}; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 16px; margin-bottom: 10px; padding-top: 12px; border-top: 1px solid ${COLORS.border};`;
 			legalHeader.textContent = "Consent";
@@ -4013,6 +4088,7 @@ mat-expansion-panel {
 		}
 		await loadAndEnroll();
 	}
+	var savedChoicesUnsub$1 = null;
 	var courseStoreModule = {
 		id: "course-store",
 		name: "Course Store",
@@ -4024,6 +4100,10 @@ mat-expansion-panel {
 			setApi$1(moduleApi);
 			const api = moduleApi;
 			await renderModuleUI$1();
+			savedChoicesUnsub$1?.();
+			savedChoicesUnsub$1 = api.bus.on("saved-choices:restored", () => {
+				renderModuleUI$1().catch((err) => api.logger.error("failed to refresh restored choices:", err));
+			});
 			const selections = await loadSelections();
 			const count = Object.keys(selections).length;
 			if (count > 0) {
@@ -4069,6 +4149,8 @@ mat-expansion-panel {
 		dispose() {
 			setIsEnrolling(false);
 			clearCoursePreview();
+			savedChoicesUnsub$1?.();
+			savedChoicesUnsub$1 = null;
 			getRouteUnsub()?.();
 			setRouteUnsub(null);
 			setApi$1(null);
@@ -5282,6 +5364,7 @@ mat-expansion-panel {
 	}
 	var EXAM_TABLE_WAIT_MS = 3e4;
 	var EXAM_RUSH_SETTLE_MS = 2e3;
+	var savedChoicesUnsub = null;
 	var examSignupModule = {
 		id: "exam-signup",
 		name: "Exam Planner",
@@ -5300,6 +5383,10 @@ mat-expansion-panel {
 				return;
 			}
 			await renderModuleUI();
+			savedChoicesUnsub?.();
+			savedChoicesUnsub = api.bus.on("saved-choices:restored", () => {
+				renderModuleUI().catch((err) => api.logger.error("failed to refresh restored choices:", err));
+			});
 			const subjectCode = getSubjectCode();
 			if (subjectCode) {
 				if ((await loadPreferences())[subjectCode]) api.logger.info(`found saved exam preference for ${subjectCode}, ready to auto-enroll`);
@@ -5315,6 +5402,8 @@ mat-expansion-panel {
 		dispose() {
 			setIsDisposed(true);
 			setIsEnrollmentInProgress(false);
+			savedChoicesUnsub?.();
+			savedChoicesUnsub = null;
 			const timer = getDebounceTimer();
 			if (timer) {
 				clearTimeout(timer);
@@ -5628,6 +5717,191 @@ mat-expansion-panel {
 		noteRedirect();
 		window.location.href = url;
 	}
+	var SAVED_CHOICES_SCHEMA = "npu.saved-choices.v1";
+	var COURSE_SELECTIONS_KEY = "courseSelections";
+	var EXAM_PREFERENCES_KEY = "examPreferences";
+	var MAX_CODE_LENGTH = 200;
+	var MAX_EXAM_FIELD_LENGTH = 500;
+	var MAX_SUBJECTS = 2e3;
+	var MAX_COURSES_PER_SUBJECT = 2e3;
+	var UNSAFE_RECORD_KEYS = new Set([
+		"__proto__",
+		"constructor",
+		"prototype"
+	]);
+	function isRecord(value) {
+		return typeof value === "object" && value !== null && !Array.isArray(value);
+	}
+	function isValidRecordKey(value) {
+		return value.length > 0 && value.length <= MAX_CODE_LENGTH && value.trim() === value && !UNSAFE_RECORD_KEYS.has(value);
+	}
+	function setOwn(target, key, value) {
+		Object.defineProperty(target, key, {
+			value,
+			enumerable: true,
+			configurable: true,
+			writable: true
+		});
+	}
+	function sanitizeCourseSelections(value) {
+		if (!isRecord(value)) return {};
+		const selections = {};
+		for (const [rawSubjectCode, rawCourseCodes] of Object.entries(value)) {
+			const subjectCode = rawSubjectCode.trim();
+			if (!isValidRecordKey(subjectCode) || !Array.isArray(rawCourseCodes)) continue;
+			const courseCodes = Array.from(new Set(rawCourseCodes.filter((courseCode) => typeof courseCode === "string").map((courseCode) => courseCode.trim()).filter((courseCode) => isValidRecordKey(courseCode)))).slice(0, MAX_COURSES_PER_SUBJECT);
+			if (courseCodes.length > 0) setOwn(selections, subjectCode, courseCodes);
+			if (Object.keys(selections).length >= MAX_SUBJECTS) break;
+		}
+		return selections;
+	}
+	function sanitizeExamPreferences(value) {
+		if (!isRecord(value)) return {};
+		const preferences = {};
+		for (const [rawSubjectCode, rawPreference] of Object.entries(value)) {
+			const subjectCode = rawSubjectCode.trim();
+			if (!isValidRecordKey(subjectCode) || !isRecord(rawPreference)) continue;
+			const date = typeof rawPreference.date === "string" ? rawPreference.date.trim() : "";
+			if (date.length === 0 || date.length > MAX_EXAM_FIELD_LENGTH) continue;
+			setOwn(preferences, subjectCode, {
+				date,
+				type: typeof rawPreference.type === "string" ? rawPreference.type.trim().slice(0, MAX_EXAM_FIELD_LENGTH) : "",
+				courseCode: typeof rawPreference.courseCode === "string" ? rawPreference.courseCode.trim().slice(0, MAX_CODE_LENGTH) : ""
+			});
+			if (Object.keys(preferences).length >= MAX_SUBJECTS) break;
+		}
+		return preferences;
+	}
+	function parseCourseSelections(value) {
+		if (!isRecord(value)) throw new Error("The backup has an invalid courseSelections section.");
+		const entries = Object.entries(value);
+		if (entries.length > MAX_SUBJECTS) throw new Error("The backup contains too many saved subjects.");
+		const selections = {};
+		for (const [subjectCode, courseCodes] of entries) {
+			if (!isValidRecordKey(subjectCode) || !Array.isArray(courseCodes)) throw new Error(`The backup has an invalid course selection for "${subjectCode}".`);
+			if (courseCodes.length === 0 || courseCodes.length > MAX_COURSES_PER_SUBJECT) throw new Error(`The backup has an invalid course list for "${subjectCode}".`);
+			const cleanCodes = [];
+			const seen = new Set();
+			for (const courseCode of courseCodes) {
+				if (typeof courseCode !== "string" || !isValidRecordKey(courseCode) || seen.has(courseCode)) throw new Error(`The backup has an invalid course code for "${subjectCode}".`);
+				seen.add(courseCode);
+				cleanCodes.push(courseCode);
+			}
+			setOwn(selections, subjectCode, cleanCodes);
+		}
+		return selections;
+	}
+	function parseExamPreferences(value) {
+		if (!isRecord(value)) throw new Error("The backup has an invalid examPreferences section.");
+		const entries = Object.entries(value);
+		if (entries.length > MAX_SUBJECTS) throw new Error("The backup contains too many saved exams.");
+		const preferences = {};
+		for (const [subjectCode, preference] of entries) {
+			if (!isValidRecordKey(subjectCode) || !isRecord(preference)) throw new Error(`The backup has an invalid exam preference for "${subjectCode}".`);
+			const { date, type, courseCode } = preference;
+			if (typeof date !== "string" || date.length === 0 || date.trim() !== date || date.length > MAX_EXAM_FIELD_LENGTH || typeof type !== "string" || type.trim() !== type || type.length > MAX_EXAM_FIELD_LENGTH || typeof courseCode !== "string" || courseCode.trim() !== courseCode || courseCode.length > MAX_CODE_LENGTH) throw new Error(`The backup has an invalid exam preference for "${subjectCode}".`);
+			setOwn(preferences, subjectCode, {
+				date,
+				type,
+				courseCode
+			});
+		}
+		return preferences;
+	}
+	async function createSavedChoicesBackup(storage, exportedAt = new Date()) {
+		const [courseSelections, examPreferences] = await Promise.all([storage.getForDomain(COURSE_SELECTIONS_KEY), storage.getForDomain(EXAM_PREFERENCES_KEY)]);
+		return {
+			schema: SAVED_CHOICES_SCHEMA,
+			exportedAt: exportedAt.toISOString(),
+			courseSelections: sanitizeCourseSelections(courseSelections),
+			examPreferences: sanitizeExamPreferences(examPreferences)
+		};
+	}
+	function serializeSavedChoicesBackup(backup) {
+		return `${JSON.stringify(backup, null, 2)}\n`;
+	}
+	function parseSavedChoicesBackup(text) {
+		if (text.length > 1e6) throw new Error("The selected backup is too large.");
+		let parsed;
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			throw new Error("The selected file is not valid JSON.");
+		}
+		if (!isRecord(parsed) || parsed.schema !== "npu.saved-choices.v1") throw new Error("The selected file is not a supported NPU saved choices backup.");
+		if (typeof parsed.exportedAt !== "string" || parsed.exportedAt.length === 0 || !Number.isFinite(Date.parse(parsed.exportedAt))) throw new Error("The backup has an invalid export date.");
+		return {
+			schema: SAVED_CHOICES_SCHEMA,
+			exportedAt: parsed.exportedAt,
+			courseSelections: parseCourseSelections(parsed.courseSelections),
+			examPreferences: parseExamPreferences(parsed.examPreferences)
+		};
+	}
+	async function restoreSavedChoicesBackup(storage, backup) {
+		const values = {
+			[COURSE_SELECTIONS_KEY]: backup.courseSelections,
+			[EXAM_PREFERENCES_KEY]: backup.examPreferences
+		};
+		if (storage.setForDomainValues) {
+			await storage.setForDomainValues(values);
+			return;
+		}
+		await storage.setForDomain(COURSE_SELECTIONS_KEY, backup.courseSelections);
+		await storage.setForDomain(EXAM_PREFERENCES_KEY, backup.examPreferences);
+	}
+	function countSavedChoices(backup) {
+		return {
+			subjects: Object.keys(backup.courseSelections).length,
+			courses: Object.values(backup.courseSelections).reduce((sum, codes) => sum + codes.length, 0),
+			exams: Object.keys(backup.examPreferences).length
+		};
+	}
+	function savedChoicesBackupFilename(exportedAt) {
+		return `npu-saved-choices-${exportedAt.slice(0, 10)}.json`;
+	}
+	function downloadSavedChoicesBackup(backup, documentRef = document, objectUrlApi = URL) {
+		const filename = savedChoicesBackupFilename(backup.exportedAt);
+		const blob = new Blob([serializeSavedChoicesBackup(backup)], { type: "application/json;charset=utf-8" });
+		const url = objectUrlApi.createObjectURL(blob);
+		const link = documentRef.createElement("a");
+		link.href = url;
+		link.download = filename;
+		link.style.display = "none";
+		documentRef.body.appendChild(link);
+		try {
+			link.click();
+		} finally {
+			link.remove();
+			window.setTimeout(() => objectUrlApi.revokeObjectURL(url), 0);
+		}
+		return filename;
+	}
+	function chooseSavedChoicesBackupFile(documentRef = document) {
+		return new Promise((resolve) => {
+			const input = documentRef.createElement("input");
+			input.type = "file";
+			input.accept = "application/json,.json";
+			input.style.display = "none";
+			let settled = false;
+			const finish = (file) => {
+				if (settled) return;
+				settled = true;
+				input.remove();
+				resolve(file);
+			};
+			input.addEventListener("change", () => finish(input.files?.[0] ?? null));
+			input.addEventListener("cancel", () => finish(null));
+			documentRef.body.appendChild(input);
+			input.click();
+		});
+	}
+	async function readSavedChoicesBackupFile(file) {
+		if (file.size > 1e6) throw new Error("The selected backup is too large.");
+		return file.text();
+	}
+	function describeSavedChoices(verb, counts) {
+		return `${verb} ${counts.subjects} saved subject${counts.subjects === 1 ? "" : "s"}, ${counts.courses} course${counts.courses === 1 ? "" : "s"}, and ${counts.exams} exam${counts.exams === 1 ? "" : "s"}.`;
+	}
 	async function main() {
 		const logger = createLogger("core");
 		if (!isLikelyNeptunPortal()) return;
@@ -5697,6 +5971,36 @@ mat-expansion-panel {
 			onThemeChange: (settings) => {
 				rushStorage.setForDomain("themeSettings", settings).catch((err) => logger.error("failed to persist themeSettings:", err));
 				logger.info(`Theme ${settings.enabled ? `enabled (${settings.color})` : "disabled"}`);
+			},
+			onExportSavedChoices: async () => {
+				try {
+					const backup = await createSavedChoicesBackup(rushStorage);
+					downloadSavedChoicesBackup(backup);
+					const message = describeSavedChoices("Exported", countSavedChoices(backup));
+					logger.info(message);
+					return message;
+				} catch (err) {
+					logger.error("failed to export saved choices:", err);
+					throw err;
+				}
+			},
+			onImportSavedChoices: async () => {
+				try {
+					const file = await chooseSavedChoicesBackupFile();
+					if (!file) return null;
+					const backup = parseSavedChoicesBackup(await readSavedChoicesBackupFile(file));
+					const counts = countSavedChoices(backup);
+					if (!window.confirm(`Import ${counts.subjects} saved subject${counts.subjects === 1 ? "" : "s"}, ${counts.courses} course${counts.courses === 1 ? "" : "s"}, and ${counts.exams} exam${counts.exams === 1 ? "" : "s"}? This replaces the current saved course and exam choices for this Neptun domain.`)) return null;
+					await restoreSavedChoicesBackup(rushStorage, backup);
+					const message = describeSavedChoices("Imported", counts);
+					logger.info(message);
+					statusPanel.addMessage("info", message);
+					bus.emit("saved-choices:restored", {});
+					return message;
+				} catch (err) {
+					logger.error("failed to import saved choices:", err);
+					throw err;
+				}
 			}
 		}, {
 			courseRush: courseRushInitial,

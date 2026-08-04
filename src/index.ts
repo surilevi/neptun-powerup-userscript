@@ -24,6 +24,24 @@ import {
   performRushRedirect,
   type RushKind,
 } from './core/rush-navigation'
+import {
+  countSavedChoices,
+  createSavedChoicesBackup,
+  parseSavedChoicesBackup,
+  restoreSavedChoicesBackup,
+} from './core/saved-choices'
+import {
+  chooseSavedChoicesBackupFile,
+  downloadSavedChoicesBackup,
+  readSavedChoicesBackupFile,
+} from './core/saved-choices-file'
+
+function describeSavedChoices(
+  verb: 'Exported' | 'Imported',
+  counts: { subjects: number; courses: number; exams: number },
+): string {
+  return `${verb} ${counts.subjects} saved subject${counts.subjects === 1 ? '' : 's'}, ${counts.courses} course${counts.courses === 1 ? '' : 's'}, and ${counts.exams} exam${counts.exams === 1 ? '' : 's'}.`
+}
 
 async function main(): Promise<void> {
   const logger = createLogger('core')
@@ -136,6 +154,41 @@ async function main(): Promise<void> {
           .setForDomain('themeSettings', settings)
           .catch((err) => logger.error('failed to persist themeSettings:', err))
         logger.info(`Theme ${settings.enabled ? `enabled (${settings.color})` : 'disabled'}`)
+      },
+      onExportSavedChoices: async () => {
+        try {
+          const backup = await createSavedChoicesBackup(rushStorage)
+          downloadSavedChoicesBackup(backup)
+          const message = describeSavedChoices('Exported', countSavedChoices(backup))
+          logger.info(message)
+          return message
+        } catch (err) {
+          logger.error('failed to export saved choices:', err)
+          throw err
+        }
+      },
+      onImportSavedChoices: async () => {
+        try {
+          const file = await chooseSavedChoicesBackupFile()
+          if (!file) return null
+
+          const backup = parseSavedChoicesBackup(await readSavedChoicesBackupFile(file))
+          const counts = countSavedChoices(backup)
+          const confirmed = window.confirm(
+            `Import ${counts.subjects} saved subject${counts.subjects === 1 ? '' : 's'}, ${counts.courses} course${counts.courses === 1 ? '' : 's'}, and ${counts.exams} exam${counts.exams === 1 ? '' : 's'}? This replaces the current saved course and exam choices for this Neptun domain.`,
+          )
+          if (!confirmed) return null
+
+          await restoreSavedChoicesBackup(rushStorage, backup)
+          const message = describeSavedChoices('Imported', counts)
+          logger.info(message)
+          statusPanel.addMessage('info', message)
+          bus.emit('saved-choices:restored', {})
+          return message
+        } catch (err) {
+          logger.error('failed to import saved choices:', err)
+          throw err
+        }
       },
     },
     {

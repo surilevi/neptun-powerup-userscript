@@ -13,6 +13,8 @@ export interface RushModeCallbacks {
   onExamRushChange: (on: boolean) => void | Promise<void>
   onConsentReset?: () => void
   onThemeChange?: (settings: ThemeSettings) => void
+  onExportSavedChoices?: () => string | null | Promise<string | null>
+  onImportSavedChoices?: () => string | null | Promise<string | null>
 }
 
 export interface RushModeInitialState {
@@ -581,6 +583,91 @@ export function createStatusPanel(
 
     themeRow.appendChild(colorRow)
     container.appendChild(themeRow)
+
+    if (rushCallbacks?.onExportSavedChoices || rushCallbacks?.onImportSavedChoices) {
+      const dataHeader = document.createElement('div')
+      dataHeader.style.cssText = `color: ${COLORS.accent}; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 16px; margin-bottom: 8px; padding-top: 12px; border-top: 1px solid ${COLORS.border};`
+      dataHeader.textContent = 'Saved choices'
+      container.appendChild(dataHeader)
+
+      const dataNote = document.createElement('div')
+      dataNote.style.cssText = `font-size: 10px; color: ${COLORS.textMuted}; margin-bottom: 8px;`
+      dataNote.textContent =
+        'Back up or replace the saved course and exam choices for this Neptun domain.'
+      container.appendChild(dataNote)
+
+      const dataActions = document.createElement('div')
+      dataActions.style.cssText = 'display: flex; gap: 6px;'
+      container.appendChild(dataActions)
+
+      const dataStatus = document.createElement('div')
+      dataStatus.id = 'npu-saved-choices-status'
+      dataStatus.setAttribute('aria-live', 'polite')
+      dataStatus.style.cssText = `font-size: 10px; color: ${COLORS.textMuted}; margin-top: 6px; min-height: 14px;`
+      container.appendChild(dataStatus)
+
+      async function runDataAction(
+        button: HTMLButtonElement,
+        pendingLabel: string,
+        action: () => string | null | Promise<string | null>,
+      ): Promise<void> {
+        const originalLabel = button.textContent ?? ''
+        const actionButtons = Array.from(dataActions.querySelectorAll('button'))
+        for (const actionButton of actionButtons) {
+          actionButton.disabled = true
+          actionButton.style.opacity = '0.7'
+        }
+        button.textContent = pendingLabel
+        dataStatus.textContent = ''
+
+        try {
+          const message = await action()
+          if (message) {
+            dataStatus.style.color = COLORS.green
+            dataStatus.textContent = message
+          }
+        } catch (err) {
+          dataStatus.style.color = COLORS.red
+          dataStatus.textContent = err instanceof Error ? err.message : String(err)
+        } finally {
+          for (const actionButton of actionButtons) {
+            actionButton.disabled = false
+            actionButton.style.opacity = '1'
+          }
+          button.textContent = originalLabel
+        }
+      }
+
+      const dataButtonStyle = `flex: 1; padding: 5px 8px; background: transparent; color: ${COLORS.text}; border: 1px solid ${COLORS.border}; border-radius: 4px; cursor: pointer; font-size: 11px;`
+
+      if (rushCallbacks.onExportSavedChoices) {
+        const exportBtn = document.createElement('button')
+        exportBtn.id = 'npu-export-saved-choices'
+        exportBtn.type = 'button'
+        exportBtn.style.cssText = dataButtonStyle
+        exportBtn.textContent = 'Export JSON'
+        exportBtn.addEventListener('click', () => {
+          runDataAction(exportBtn, 'Exporting...', rushCallbacks.onExportSavedChoices!).catch(
+            () => undefined,
+          )
+        })
+        dataActions.appendChild(exportBtn)
+      }
+
+      if (rushCallbacks.onImportSavedChoices) {
+        const importBtn = document.createElement('button')
+        importBtn.id = 'npu-import-saved-choices'
+        importBtn.type = 'button'
+        importBtn.style.cssText = dataButtonStyle
+        importBtn.textContent = 'Import JSON'
+        importBtn.addEventListener('click', () => {
+          runDataAction(importBtn, 'Importing...', rushCallbacks.onImportSavedChoices!).catch(
+            () => undefined,
+          )
+        })
+        dataActions.appendChild(importBtn)
+      }
+    }
 
     // Legal section
     const legalHeader = document.createElement('div')

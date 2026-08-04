@@ -15,6 +15,9 @@ describe('StorageService', () => {
   beforeEach(() => {
     Object.keys(gmStore).forEach((k) => delete gmStore[k])
     vi.clearAllMocks()
+    gmMock.setValue.mockImplementation(async (key: string, value: string) => {
+      gmStore[key] = value
+    })
   })
 
   it('should return undefined for missing key', async () => {
@@ -80,5 +83,32 @@ describe('StorageService', () => {
       enabled: true,
       color: 'blue',
     })
+  })
+
+  it('should update multiple domain values in one storage write', async () => {
+    const storage = createStorageService(gmMock, 'example.hu')
+
+    await storage.setForDomainValues?.({
+      courseSelections: { ABC12DE345: ['NE1'] },
+      examPreferences: { ABC12DE345: { date: '2026. június 8. 8:00' } },
+    })
+
+    expect(gmMock.setValue).toHaveBeenCalledOnce()
+    expect(await storage.getForDomain('courseSelections')).toEqual({
+      ABC12DE345: ['NE1'],
+    })
+    expect(await storage.getForDomain('examPreferences')).toEqual({
+      ABC12DE345: { date: '2026. június 8. 8:00' },
+    })
+  })
+
+  it('should surface storage write failures', async () => {
+    const storage = createStorageService(gmMock, 'example.hu')
+    const error = new Error('quota exceeded')
+    gmMock.setValue.mockRejectedValueOnce(error)
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await expect(storage.set('key', 'value')).rejects.toBe(error)
+    expect(consoleError).toHaveBeenCalledWith('[NPU:storage] failed to save data:', error)
   })
 })

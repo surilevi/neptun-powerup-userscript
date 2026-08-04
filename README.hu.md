@@ -19,6 +19,7 @@ A script nem helyetted dönt, és nem kerül meg Neptun-szabályokat. A már kiv
 - `Course Rush`: az órarendtervező pontos kurzusválasztásait olvassa ki, majd a látható `Tárgy felvétele` gombokat egymás után kattintja. Belépés után magától megnyitja a `Tárgyfelvétel` oldalt, egyszer lefut, majd kikapcsolja önmagát. Üres tervezőnél a helyben mentett választás lehet a tartalék.
 - `Exam Planner`: naptárban mutatja a látható felvett és mentett vizsgaidőpontokat, és továbbra is el tud menteni egy választott időpontot későbbi jelentkezéshez.
 - `Exam Rush`: az aktuálisan látható vizsgaoldalon végigpróbálja a mentett vizsgacélokat.
+- `JSON backup`: a beállításokból fájlba menti, majd szükség esetén visszaállítja a mentett kurzus- és vizsgaválasztásokat.
 - `Infinite Session`: normál használat közben megpróbálja frissen tartani a munkamenetet. Tárgyfelvételi vagy vizsgajelentkezési roham alatt a Neptun ettől függetlenül is kidobhat.
 - `Theme`: választható színkiemelés a Neptun felületén.
 
@@ -69,6 +70,12 @@ A userscript nem konkrét egyetemi hostnevekre van bekötve. A gyakori Neptun ha
 
 Emiatt több intézményi Neptun-telepítésen is működhet külön build nélkül. A helyi Neptun-testreszabások ettől még okozhatnak eltéréseket.
 
+## Biztonsági mentés és visszaállítás
+
+Nyisd meg az NPU panelt, kattints a fogaskerékre, majd a `Saved choices` résznél válaszd az `Export JSON` vagy `Import JSON` gombot. Az exportált fájl csak a jelenlegi Neptun-domainhez mentett kurzus- és vizsgaválasztásokat tartalmazza.
+
+Az importálás ellenőrzi a fájl formátumát, összesíti a tartalmát, majd megerősítést kér. A jóváhagyott import lecseréli a jelenlegi domainhez tartozó mentett kurzus- és vizsgaválasztásokat; automatikus jelentkezést nem indít.
+
 ## Korlátok
 
 - A script a jelenlegi Neptun Angular/Material DOM-szerkezetére támaszkodik. Egy Neptun UI-frissítés eltörhet szelektorokat.
@@ -83,6 +90,7 @@ Emiatt több intézményi Neptun-telepítésen is működhet külön build nélk
 
 - A script a saját beállításait és mentett választásait Tampermonkey-tárhelyen tárolja.
 - Az órarendtervezős folyamat olvasó lekérdezéseket futtat a Neptun saját végpontjaira, hogy a felvétel eredményét ellenőrizni tudja. Ezek ugyanazok a lekérdezések, amelyeket a Neptun felülete magától is elvégez, és nem kerülnek ki a Neptun kiszolgálójáról.
+- A JSON biztonsági mentés helyi fájlként töltődik le; az NPU nem küldi el külső szolgáltatásnak.
 - Ha a Tampermonkey tárhely-API nem érhető el, az NPU nem aktiválódik.
 - Felhasználónevet és jelszót nem ment tartósan.
 - A részletes debug naplózás csak akkor aktív, ha külön bekapcsolod.
