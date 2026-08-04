@@ -4,14 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  brace-expansion@<1.1.16: 1.1.16
-  brace-expansion@>=4.0.0 <5.0.8: 5.0.8
-  minimatch@<3.1.4: 3.1.4
-  minimatch@>=10.0.0 <10.2.5: 10.2.5
-  picomatch@<4.0.4: 4.0.4
-  postcss@<8.5.18: 8.5.18
-
 importers:
 
   .:
@@ -45,7 +37,7 @@ importers:
         version: 8.2.0(esbuild@0.28.1)
       vite-plugin-monkey:
         specifier: ^8.1.0
-        version: 8.1.0(postcss@8.5.18)(vite@8.2.0(esbuild@0.28.1))
+        version: 8.1.0(postcss@8.5.25)(vite@8.2.0(esbuild@0.28.1))
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(jsdom@30.0.1)(vite@8.2.0(esbuild@0.28.1))
@@ -893,7 +885,7 @@ packages:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
     engines: {node: '>=12.0.0'}
     peerDependencies:
-      picomatch: 4.0.4
+      picomatch: ^3 || ^4
     peerDependenciesMeta:
       picomatch:
         optional: true
@@ -1178,11 +1170,7 @@ packages:
     resolution: {integrity: sha512-/oBzyLOHQvXvVr/7bzZOFD5lYTy1nomVE4aMA9eY5KQsHfWLDIzb86q8XoUsmrj2xKoGYMAvd884EzJEQzuXIw==}
     engines: {node: '>=10'}
     peerDependencies:
-      postcss: 8.5.18
-
-  postcss@8.5.18:
-    resolution: {integrity: sha512-xdB1oSLHbz1vRWgCDalrCqEFTWzFlhqFC5tIHLMOSUIjhm3XXQ1qrFy8S/ESr1JYRRXqM3c1QFiMZUJdUTqyMQ==}
-    engines: {node: ^10 || ^12 || >=14}
+      postcss: ^8.0.0
 
   postcss@8.5.25:
     resolution: {integrity: sha512-DTPx3RWSSnWyzLxQnlH0rJP+EW5ekl16ZU4/psbIhA0e53kJfdgaN5vKM+xP7yJtXVu+nfdVFmlgFDEKAe4Pyw==}
@@ -2414,19 +2402,13 @@ snapshots:
 
   picomatch@4.0.5: {}
 
-  postcss-url@10.1.4(postcss@8.5.18):
+  postcss-url@10.1.4(postcss@8.5.25):
     dependencies:
       make-dir: 3.1.0
       mime: 2.5.2
       minimatch: 3.1.5
-      postcss: 8.5.18
+      postcss: 8.5.25
       xxhashjs: 0.2.2
-
-  postcss@8.5.18:
-    dependencies:
-      nanoid: 3.3.16
-      picocolors: 1.1.1
-      source-map-js: 1.2.1
 
   postcss@8.5.25:
     dependencies:
@@ -2580,7 +2562,7 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  vite-plugin-monkey@8.1.0(postcss@8.5.18)(vite@8.2.0(esbuild@0.28.1)):
+  vite-plugin-monkey@8.1.0(postcss@8.5.25)(vite@8.2.0(esbuild@0.28.1)):
     dependencies:
       acorn-walk: 8.3.5
       cross-spawn: 7.0.6
@@ -2590,7 +2572,7 @@ snapshots:
       mrmime: 2.0.1
       open: 11.0.0
       picocolors: 1.1.1
-      postcss-url: 10.1.4(postcss@8.5.18)
+      postcss-url: 10.1.4(postcss@8.5.25)
       rollup: 4.62.4
       systemjs: 6.15.1
     optionalDependencies:
