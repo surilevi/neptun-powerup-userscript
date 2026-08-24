@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neptun PowerUp! Userscript
 // @namespace    https://github.com/surilevi/neptun-powerup-userscript
-// @version      3.5.0
+// @version      3.5.1
 // @author       surilevi
 // @description  Neptun PowerUp! userscript for course and exam workflows
 // @license      MIT
@@ -1880,7 +1880,8 @@ mat-expansion-panel {
 		controlActionSettleMs: 3e3,
 		controlActionMaxAttempts: 3,
 		courseSelectionStabilityWindowMs: 400,
-		emptySelectionGraceMs: 3e3,
+		emptySelectionGraceRatio: .1,
+		emptySelectionGraceMinMs: 3e3,
 		panelExpandTimeoutMs: 5e3,
 		panelExpandFallbackMs: 800,
 		domStateSettleMs: 150,
@@ -3347,14 +3348,16 @@ mat-expansion-panel {
 		});
 		const expectedSelectedBySubject = new Map();
 		for (const planned of plannedFromApi ?? []) expectedSelectedBySubject.set(planned.code, planned.scheduledCourseIds.length);
+		const emptySelectionGraceMs = Math.max(PLANNER_TIMING.emptySelectionGraceMinMs, Math.round(contentTimeoutMs * PLANNER_TIMING.emptySelectionGraceRatio));
 		diagnostics.log("course-rows:waiting", {
 			timeoutMs: contentTimeoutMs,
 			expectationSource: expectedSelectedBySubject.size > 0 ? "api" : "stability",
-			stabilityWindowMs: PLANNER_TIMING.courseSelectionStabilityWindowMs
+			stabilityWindowMs: PLANNER_TIMING.courseSelectionStabilityWindowMs,
+			emptySelectionGraceMs
 		});
 		const readSelectionSignature = () => expandedEntries.map(({ subjectCode, panel }) => `${subjectCode}:${countSelectedCourseItems(panel)}`).join("|");
 		const waitStartedAt = Date.now();
-		const emptySelectionDeadline = waitStartedAt + PLANNER_TIMING.emptySelectionGraceMs;
+		const emptySelectionDeadline = waitStartedAt + emptySelectionGraceMs;
 		let lastSignature = readSelectionSignature();
 		let signatureStableSince = Date.now();
 		while (Date.now() < contentDeadline) {
