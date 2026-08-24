@@ -977,8 +977,10 @@ mat-expansion-panel {
 			const color = dotColor();
 			if (badgeDot) badgeDot.style.background = color;
 			if (headerDot) headerDot.style.background = color;
-			if (badge) if (courseRushOn || examRushOn) badge.style.animation = "npu-pulse 2s ease-in-out infinite";
-			else badge.style.animation = "";
+			if (badge) {
+				if (courseRushOn || examRushOn) badge.style.animation = "npu-pulse 2s ease-in-out infinite";
+				else badge.style.animation = "";
+			}
 		}
 		function renderSessionLine() {
 			if (!sessionLine) return;
@@ -4136,12 +4138,13 @@ mat-expansion-panel {
 				if (!plannerResult.plannerReady) api.statusPanel.addMessage("warn", "Neptun timetable planner did not become ready. Local fallback was not started automatically; nothing else was clicked.");
 				else if (plannerResult.listedSubjects === 0 && plannerResult.plannedSubjects === 0 && plannerResult.attempted === 0 && !plannerResult.aborted) {
 					const rushSelections = await loadSelections();
-					if (Object.keys(rushSelections).length > 0) if (plannerResult.openedPlanner && closePlannerSafely()) await runLocalSavedRushFallback(api);
-					else {
-						api.logger.warn("Rush Mode: planner was already open and empty; local fallback was not started automatically");
-						api.statusPanel.addMessage("warn", "Planner is empty, but it was already open. Close it and use Local Load + Enroll for the saved fallback.");
-					}
-					else api.statusPanel.addMessage("warn", "No planned subjects or locally saved fallback courses were found. Nothing was clicked.");
+					if (Object.keys(rushSelections).length > 0) {
+						if (plannerResult.openedPlanner && closePlannerSafely()) await runLocalSavedRushFallback(api);
+						else {
+							api.logger.warn("Rush Mode: planner was already open and empty; local fallback was not started automatically");
+							api.statusPanel.addMessage("warn", "Planner is empty, but it was already open. Close it and use Local Load + Enroll for the saved fallback.");
+						}
+					} else api.statusPanel.addMessage("warn", "No planned subjects or locally saved fallback courses were found. Nothing was clicked.");
 				}
 			} else await autoSearchSubjects();
 			api.logger.info("initialized on registration page");
@@ -5925,12 +5928,14 @@ mat-expansion-panel {
 		logger.info(`domain: ${domain}, path: ${buildContext().path}`);
 		const bus = createEventBus();
 		const rushStorage = createStorageService(gmStorage, domain);
-		if (!await hasConsent(rushStorage)) if (await showConsentDialog(typeof GM !== "undefined" && GM.info?.script?.version ? GM.info.script.version : "dev")) {
-			await storeConsent(rushStorage);
-			logger.info("consent accepted");
-		} else {
-			logger.info("consent declined — NPU will not activate");
-			return;
+		if (!await hasConsent(rushStorage)) {
+			if (await showConsentDialog(typeof GM !== "undefined" && GM.info?.script?.version ? GM.info.script.version : "dev")) {
+				await storeConsent(rushStorage);
+				logger.info("consent accepted");
+			} else {
+				logger.info("consent declined — NPU will not activate");
+				return;
+			}
 		}
 		const courseRushInitial = await rushStorage.get("courseRushMode") ?? false;
 		const examRushInitial = await rushStorage.get("examRushMode") ?? false;
