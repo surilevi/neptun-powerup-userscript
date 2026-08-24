@@ -30,6 +30,24 @@ export const PLANNER_TIMING = Object.freeze({
   /** Bounded retries for a planner control that did not change state. */
   controlActionMaxAttempts: 3,
 
+  /**
+   * How long the planner's course selection state must stop changing.
+   *
+   * Neptun renders course rows before it marks which of them the planner holds,
+   * so a snapshot taken the moment rows appear can read zero selected courses
+   * and silently drop that subject from the run.
+   */
+  courseSelectionStabilityWindowMs: 400,
+
+  /**
+   * How long a planner subject may show zero selected courses before NPU accepts
+   * that reading. An unchanging zero is indistinguishable from a settled value,
+   * so a stability window alone cannot catch a late selection. Only used when the
+   * planner API gave no per-subject count to compare against; an already
+   * registered subject legitimately reaches this deadline.
+   */
+  emptySelectionGraceMs: 3_000,
+
   /** Panel body render budget after a header click. */
   panelExpandTimeoutMs: 5_000,
   /** Last-resort settle when a panel body never matched the expected selector. */

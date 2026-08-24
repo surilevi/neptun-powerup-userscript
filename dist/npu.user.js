@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neptun PowerUp! Userscript
 // @namespace    https://github.com/surilevi/neptun-powerup-userscript
-// @version      3.4.1
+// @version      3.5.0
 // @author       surilevi
 // @description  Neptun PowerUp! userscript for course and exam workflows
 // @license      MIT
@@ -1274,10 +1274,27 @@ mat-expansion-panel {
 	};
 	var SESSION_STORAGE_KEYS = {
 		accessToken: "access_token",
+		accessTokenExpiration: "access_token_expiration_date",
+		sessionExpiration: "session_expiration_date",
 		refreshTokenExpiration: "refresh_token_expiration",
 		loginType: "login_type",
 		tabId: "tabId"
 	};
+	var SESSION_EXPIRATION_KEYS = [SESSION_STORAGE_KEYS.sessionExpiration, SESSION_STORAGE_KEYS.refreshTokenExpiration];
+	function readSessionExpiresAt(storage) {
+		for (const key of SESSION_EXPIRATION_KEYS) {
+			let raw;
+			try {
+				raw = storage.getItem(key);
+			} catch {
+				return 0;
+			}
+			if (!raw) continue;
+			const parsed = Date.parse(raw);
+			if (Number.isFinite(parsed)) return parsed;
+		}
+		return 0;
+	}
 	var POLL_INTERVAL_MS = 2e3;
 	function decodeJwt(token) {
 		try {
@@ -1336,12 +1353,18 @@ mat-expansion-panel {
 				logger.warn(`JWT exp claim is not a finite number (got ${jwt.exp}), skipping token`);
 				return;
 			}
-			const refreshExpiration = readSessionStorage(SESSION_STORAGE_KEYS.refreshTokenExpiration);
+			let refreshExpiration = null;
 			let refreshExpiresAt = 0;
-			if (refreshExpiration) {
-				const parsed = Date.parse(refreshExpiration);
-				if (Number.isFinite(parsed)) refreshExpiresAt = parsed;
-				else logger.warn(`[interceptor-debug] refresh_token_expiration is not a valid date: "${refreshExpiration}"`);
+			for (const key of SESSION_EXPIRATION_KEYS) {
+				const raw = readSessionStorage(key);
+				if (!raw) continue;
+				refreshExpiration = raw;
+				const parsed = Date.parse(raw);
+				if (Number.isFinite(parsed)) {
+					refreshExpiresAt = parsed;
+					break;
+				}
+				logger.warn(`[interceptor-debug] ${key} is not a valid date: "${raw}"`);
 			}
 			logger.info(`token detected, access expires at ${new Date(expiresAt).toISOString()}, refresh expires at ${refreshExpiresAt ? new Date(refreshExpiresAt).toISOString() : "unknown"}`);
 			bus.emit("token:acquired", {
@@ -1420,6 +1443,8 @@ mat-expansion-panel {
 		try {
 			return [
 				"access_token",
+				"access_token_expiration_date",
+				"session_expiration_date",
 				"refresh_token_expiration",
 				"login_type",
 				"tabId"
@@ -1467,13 +1492,19 @@ mat-expansion-panel {
 	}
 	function getStoredRefreshExpiresAt() {
 		try {
-			const expStr = sessionStorage.getItem(SESSION_STORAGE_KEYS.refreshTokenExpiration);
-			if (!expStr) return 0;
-			const expMs = Date.parse(expStr);
-			return Number.isFinite(expMs) ? expMs : 0;
+			return readSessionExpiresAt(sessionStorage);
 		} catch {
 			return 0;
 		}
+	}
+	function readStoredSessionExpirationRaw() {
+		for (const key of SESSION_EXPIRATION_KEYS) try {
+			const raw = sessionStorage.getItem(key);
+			if (raw) return raw;
+		} catch {
+			return null;
+		}
+		return null;
 	}
 	function formatRemaining(ms) {
 		return Number.isFinite(ms) && ms >= 0 ? `${Math.round(ms / 1e3)}s` : "unknown";
@@ -1507,12 +1538,8 @@ mat-expansion-panel {
 			if (!jwt) return null;
 			const expiresAt = jwt.exp * 1e3;
 			if (!Number.isFinite(expiresAt)) return null;
-			const refreshExpiration = sessionStorage.getItem(SESSION_STORAGE_KEYS.refreshTokenExpiration);
-			let refreshExpiresAt = 0;
-			if (refreshExpiration) {
-				const parsed = Date.parse(refreshExpiration);
-				if (Number.isFinite(parsed)) refreshExpiresAt = parsed;
-			}
+			const refreshExpiration = readStoredSessionExpirationRaw();
+			const refreshExpiresAt = readSessionExpiresAt(sessionStorage);
 			return {
 				accessToken,
 				refreshToken: refreshExpiration ?? "",
@@ -1852,6 +1879,8 @@ mat-expansion-panel {
 		controlActionCooldownMs: 1200,
 		controlActionSettleMs: 3e3,
 		controlActionMaxAttempts: 3,
+		courseSelectionStabilityWindowMs: 400,
+		emptySelectionGraceMs: 3e3,
 		panelExpandTimeoutMs: 5e3,
 		panelExpandFallbackMs: 800,
 		domStateSettleMs: 150,
@@ -2128,7 +2157,9 @@ mat-expansion-panel {
 			const node = walker.currentNode;
 			const text = node.textContent?.replace(/\s+/g, " ").trim();
 			if (!text) continue;
-			if (node.parentElement?.closest("button, mat-icon, .mat-icon, mat-chip, .mat-chip, .mat-mdc-chip")) continue;
+			const parent = node.parentElement;
+			if (parent?.closest("button, mat-icon, .mat-icon, mat-chip, .mat-chip, .mat-mdc-chip")) continue;
+			if (parent?.closest(".cdk-visually-hidden")) continue;
 			candidates.push(text);
 		}
 		return candidates;
@@ -2197,6 +2228,8 @@ mat-expansion-panel {
 		const api = getApi$1();
 		const text = (courseItem.textContent ?? "").trim();
 		for (const selector of [
+			".code-with-time .h6-unformatted",
+			".h6-unformatted",
 			".mat-mdc-checkbox .mdc-label",
 			".mat-checkbox-label",
 			"mat-checkbox label",
@@ -3161,6 +3194,9 @@ mat-expansion-panel {
 	function findEnrollmentButton$1(panel) {
 		return Array.from(panel.querySelectorAll("button")).find((button) => isEnrollButtonText(button.textContent ?? "")) ?? null;
 	}
+	function countSelectedCourseItems(panel) {
+		return getCourseItems(panel).filter((item) => isCourseSelected(item)).length;
+	}
 	function readExpandedPlannerSubject(subjectCode, panel) {
 		const selectedCourseItems = getCourseItems(panel).filter((item) => isCourseSelected(item));
 		const courseCodes = Array.from(new Set(selectedCourseItems.map((item) => extractCourseCode(item)).filter((code) => code !== null)));
@@ -3244,7 +3280,7 @@ mat-expansion-panel {
 		const apiPlannedCount = plannedFromApi?.length ?? null;
 		diagnostics.log("api:planned-subjects", {
 			ok: apiResult?.ok ?? false,
-			failure: apiResult?.failure ?? "unavailable",
+			failure: apiResult ? apiResult.failure ?? "none" : "unavailable",
 			count: apiPlannedCount
 		});
 		if (!preparation.root) return {
@@ -3309,8 +3345,45 @@ mat-expansion-panel {
 			expandedCount: expandedEntries.length,
 			failedCount: subjectEntries.length - expandedEntries.length
 		});
-		diagnostics.log("course-rows:waiting", { timeoutMs: contentTimeoutMs });
-		while (Date.now() < contentDeadline && expandedEntries.some(({ panel }) => getCourseItems(panel).length === 0)) await delay(PLANNER_TIMING.domPollIntervalMs);
+		const expectedSelectedBySubject = new Map();
+		for (const planned of plannedFromApi ?? []) expectedSelectedBySubject.set(planned.code, planned.scheduledCourseIds.length);
+		diagnostics.log("course-rows:waiting", {
+			timeoutMs: contentTimeoutMs,
+			expectationSource: expectedSelectedBySubject.size > 0 ? "api" : "stability",
+			stabilityWindowMs: PLANNER_TIMING.courseSelectionStabilityWindowMs
+		});
+		const readSelectionSignature = () => expandedEntries.map(({ subjectCode, panel }) => `${subjectCode}:${countSelectedCourseItems(panel)}`).join("|");
+		const waitStartedAt = Date.now();
+		const emptySelectionDeadline = waitStartedAt + PLANNER_TIMING.emptySelectionGraceMs;
+		let lastSignature = readSelectionSignature();
+		let signatureStableSince = Date.now();
+		while (Date.now() < contentDeadline) {
+			const signature = readSelectionSignature();
+			if (signature !== lastSignature) {
+				lastSignature = signature;
+				signatureStableSince = Date.now();
+			}
+			const everyPanelHasRows = expandedEntries.every(({ panel }) => getCourseItems(panel).length > 0);
+			const selectionResolved = expandedEntries.every(({ subjectCode, panel }) => {
+				const expected = expectedSelectedBySubject.get(subjectCode);
+				const actual = countSelectedCourseItems(panel);
+				if (expected !== void 0) return actual >= expected;
+				return actual > 0 || Date.now() >= emptySelectionDeadline;
+			});
+			const selectionSettled = Date.now() - signatureStableSince >= PLANNER_TIMING.courseSelectionStabilityWindowMs;
+			if (everyPanelHasRows && selectionResolved && selectionSettled) break;
+			await delay(PLANNER_TIMING.domPollIntervalMs);
+		}
+		const unmetExpectations = expandedEntries.filter(({ subjectCode, panel }) => {
+			const expected = expectedSelectedBySubject.get(subjectCode);
+			return expected !== void 0 && countSelectedCourseItems(panel) < expected;
+		}).length;
+		diagnostics.log("course-rows:ready", {
+			waitedMs: Date.now() - waitStartedAt,
+			selectedRows: expandedEntries.reduce((sum, { panel }) => sum + countSelectedCourseItems(panel), 0),
+			expectedRows: expectedSelectedBySubject.size > 0 ? Array.from(expectedSelectedBySubject.values()).reduce((sum, count) => sum + count, 0) : null,
+			unmetExpectations
+		});
 		for (const { subjectCode, panel } of expandedEntries) {
 			if (getCourseItems(panel).length === 0) {
 				issues.push(`${subjectCode}: planner course rows did not finish loading`);

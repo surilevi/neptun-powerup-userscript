@@ -112,6 +112,13 @@ function getTextNodeCandidates(root: Element): string[] {
       continue
     }
 
+    // Neptun renders a screen-reader-only copy of the course code with its
+    // characters spelled out ("Kurzuskód: A E 1" next to the real "AE1"). It can
+    // only mislead the extractor, so it never becomes a candidate.
+    if (parent?.closest('.cdk-visually-hidden')) {
+      continue
+    }
+
     candidates.push(text)
   }
 
@@ -241,6 +248,11 @@ export function extractCourseCode(courseItem: Element): string | null {
   const text = (courseItem.textContent ?? '').trim()
 
   const selectors = [
+    // Neptun 2026.2.9 puts the plain course code in its own heading beside the
+    // time. The Material label selectors below render empty on that build, so
+    // this is the only exact source; they stay as fallbacks for older portals.
+    '.code-with-time .h6-unformatted',
+    '.h6-unformatted',
     '.mat-mdc-checkbox .mdc-label',
     '.mat-checkbox-label',
     'mat-checkbox label',

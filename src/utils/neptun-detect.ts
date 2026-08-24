@@ -57,9 +57,14 @@ export function hasNeptunFingerprint(doc: Document = document): boolean {
 
 export function hasNeptunSessionStorage(storage: Storage = sessionStorage): boolean {
   try {
-    return ['access_token', 'refresh_token_expiration', 'login_type', 'tabId'].some(
-      (key) => storage.getItem(key) !== null,
-    )
+    return [
+      'access_token',
+      'access_token_expiration_date',
+      'session_expiration_date',
+      'refresh_token_expiration',
+      'login_type',
+      'tabId',
+    ].some((key) => storage.getItem(key) !== null)
   } catch {
     return false
   }

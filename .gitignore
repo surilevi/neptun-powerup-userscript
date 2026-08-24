@@ -30,3 +30,6 @@ pnpm-debug.log*
 
 # Test coverage
 coverage/
+
+# Local scratch builds (never committed)
+local/

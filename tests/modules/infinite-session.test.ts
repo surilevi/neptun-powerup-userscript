@@ -626,4 +626,48 @@ describe('infiniteSessionModule', () => {
     expect(acquiredHandler).toHaveBeenCalledTimes(2)
     nativeRefresh.dispose()
   })
+
+  /**
+   * Neptun 2026.2.9 replaced 'refresh_token_expiration' with a separate
+   * 'session_expiration_date'. Verified live on 2026-08-24: the old key is gone,
+   * which left the session countdown blank and the keep-alive running on the
+   * 5 minute access token alone. Both spellings must keep working.
+   */
+  function initializeWithSessionKeys(keys: Record<string, string>): {
+    info: ReturnType<typeof vi.spyOn>
+  } {
+    const bus = createEventBus()
+    const api = createMockApi(bus)
+    const info = vi.spyOn(api.logger, 'info')
+
+    sessionStorage.setItem('access_token', createFakeJwt(Math.floor(Date.now() / 1000) + 300))
+    for (const [key, value] of Object.entries(keys)) sessionStorage.setItem(key, value)
+
+    void infiniteSessionModule.initialize(api)
+    return { info }
+  }
+
+  const inMinutes = (minutes: number): string =>
+    new Date(Date.now() + minutes * 60_000).toISOString()
+
+  it('recovers the session deadline from the 2026.2.9 session_expiration_date key', () => {
+    const { info } = initializeWithSessionKeys({ session_expiration_date: inMinutes(30) })
+
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('refresh expires in 1800s'))
+  })
+
+  it('prefers session_expiration_date over a stale legacy key', () => {
+    const { info } = initializeWithSessionKeys({
+      session_expiration_date: inMinutes(30),
+      refresh_token_expiration: inMinutes(2),
+    })
+
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('refresh expires in 1800s'))
+  })
+
+  it('still recovers the session deadline from the pre-2026.2.9 key', () => {
+    const { info } = initializeWithSessionKeys({ refresh_token_expiration: inMinutes(30) })
+
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('refresh expires in 1800s'))
+  })
 })

@@ -374,6 +374,10 @@ function findEnrollmentButton(panel: Element): HTMLButtonElement | null {
   )
 }
 
+function countSelectedCourseItems(panel: Element): number {
+  return getCourseItems(panel).filter((item) => isCourseSelected(item)).length
+}
+
 function readExpandedPlannerSubject(subjectCode: string, panel: Element): PlannerSubjectTarget {
   const selectedCourseItems = getCourseItems(panel).filter((item) => isCourseSelected(item))
   const courseCodes = Array.from(
@@ -498,7 +502,9 @@ export async function collectPlannerSnapshot(
 
   diagnostics.log('api:planned-subjects', {
     ok: apiResult?.ok ?? false,
-    failure: apiResult?.failure ?? 'unavailable',
+    // A successful call reports `failure: null`, so `?? 'unavailable'` used to
+    // label every healthy read as a failure in the one log a rush is debugged from.
+    failure: apiResult ? (apiResult.failure ?? 'none') : 'unavailable',
     count: apiPlannedCount,
   })
 
@@ -584,13 +590,74 @@ export async function collectPlannerSnapshot(
     failedCount: subjectEntries.length - expandedEntries.length,
   })
 
-  diagnostics.log('course-rows:waiting', { timeoutMs: contentTimeoutMs })
-  while (
-    Date.now() < contentDeadline &&
-    expandedEntries.some(({ panel }) => getCourseItems(panel).length === 0)
-  ) {
+  // Rows render before Neptun marks which of them the planner actually holds, so
+  // waiting for rows alone can snapshot a panel whose selection is still empty and
+  // drop that subject from the run. Prefer the API's own per-subject count as the
+  // completion signal, and require the selection to stop changing either way.
+  const expectedSelectedBySubject = new Map<string, number>()
+  for (const planned of plannedFromApi ?? []) {
+    expectedSelectedBySubject.set(planned.code, planned.scheduledCourseIds.length)
+  }
+
+  diagnostics.log('course-rows:waiting', {
+    timeoutMs: contentTimeoutMs,
+    expectationSource: expectedSelectedBySubject.size > 0 ? 'api' : 'stability',
+    stabilityWindowMs: PLANNER_TIMING.courseSelectionStabilityWindowMs,
+  })
+
+  const readSelectionSignature = (): string =>
+    expandedEntries
+      .map(({ subjectCode, panel }) => `${subjectCode}:${countSelectedCourseItems(panel)}`)
+      .join('|')
+
+  const waitStartedAt = Date.now()
+  const emptySelectionDeadline = waitStartedAt + PLANNER_TIMING.emptySelectionGraceMs
+  let lastSignature = readSelectionSignature()
+  let signatureStableSince = Date.now()
+
+  while (Date.now() < contentDeadline) {
+    const signature = readSelectionSignature()
+    if (signature !== lastSignature) {
+      lastSignature = signature
+      signatureStableSince = Date.now()
+    }
+
+    const everyPanelHasRows = expandedEntries.every(({ panel }) => getCourseItems(panel).length > 0)
+    // A count that has not moved is not evidence that it finished: a subject whose
+    // selection has not been applied yet reads a perfectly stable zero. Compare
+    // against the API's own count where there is one, and otherwise give an empty
+    // selection a bounded grace period before believing it.
+    const selectionResolved = expandedEntries.every(({ subjectCode, panel }) => {
+      const expected = expectedSelectedBySubject.get(subjectCode)
+      const actual = countSelectedCourseItems(panel)
+      if (expected !== undefined) return actual >= expected
+      return actual > 0 || Date.now() >= emptySelectionDeadline
+    })
+    const selectionSettled =
+      Date.now() - signatureStableSince >= PLANNER_TIMING.courseSelectionStabilityWindowMs
+
+    if (everyPanelHasRows && selectionResolved && selectionSettled) break
+
     await delay(PLANNER_TIMING.domPollIntervalMs)
   }
+
+  const unmetExpectations = expandedEntries.filter(({ subjectCode, panel }) => {
+    const expected = expectedSelectedBySubject.get(subjectCode)
+    return expected !== undefined && countSelectedCourseItems(panel) < expected
+  }).length
+
+  diagnostics.log('course-rows:ready', {
+    waitedMs: Date.now() - waitStartedAt,
+    selectedRows: expandedEntries.reduce(
+      (sum, { panel }) => sum + countSelectedCourseItems(panel),
+      0,
+    ),
+    expectedRows:
+      expectedSelectedBySubject.size > 0
+        ? Array.from(expectedSelectedBySubject.values()).reduce((sum, count) => sum + count, 0)
+        : null,
+    unmetExpectations,
+  })
 
   for (const { subjectCode, panel } of expandedEntries) {
     if (getCourseItems(panel).length === 0) {

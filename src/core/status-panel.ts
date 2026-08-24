@@ -1052,8 +1052,8 @@ export function createStatusPanel(
         if (refreshRemaining > 0) {
           setSessionStatus('active', refreshRemaining)
         } else {
-          // Refresh expiry not available yet (first token detection, Angular hasn't
-          // written refresh_token_expiration to sessionStorage yet).
+          // Session expiry not available yet (first token detection, Angular hasn't
+          // written the session expiry key to sessionStorage yet).
           // Show "active" without a countdown — next token event will have the real expiry.
           setSessionStatus('active', 0)
         }

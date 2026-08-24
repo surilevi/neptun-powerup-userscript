@@ -1,6 +1,6 @@
 import type { EventBus } from './event-bus'
 import type { Logger } from './logger'
-import { SESSION_STORAGE_KEYS } from '../types/neptun-api'
+import { SESSION_EXPIRATION_KEYS, SESSION_STORAGE_KEYS } from '../types/neptun-api'
 import type { JwtPayload } from '../types/neptun-api'
 
 const POLL_INTERVAL_MS = 2000 // Check sessionStorage every 2 seconds
@@ -106,19 +106,23 @@ export function setupInterceptor(bus: EventBus, logger: Logger): () => void {
       return
     }
 
-    const refreshExpiration = readSessionStorage(SESSION_STORAGE_KEYS.refreshTokenExpiration)
-
-    // Parse refresh token expiry from ISO string to milliseconds
+    // Neptun 2026.2.9 renamed this to 'session_expiration_date'; the older
+    // 'refresh_token_expiration' is still read so both builds report a countdown.
+    let refreshExpiration: string | null = null
     let refreshExpiresAt = 0
-    if (refreshExpiration) {
-      const parsed = Date.parse(refreshExpiration)
+
+    for (const key of SESSION_EXPIRATION_KEYS) {
+      const raw = readSessionStorage(key)
+      if (!raw) continue
+
+      refreshExpiration = raw
+      const parsed = Date.parse(raw)
       if (Number.isFinite(parsed)) {
         refreshExpiresAt = parsed
-      } else {
-        logger.warn(
-          `[interceptor-debug] refresh_token_expiration is not a valid date: "${refreshExpiration}"`,
-        )
+        break
       }
+
+      logger.warn(`[interceptor-debug] ${key} is not a valid date: "${raw}"`)
     }
 
     logger.info(
