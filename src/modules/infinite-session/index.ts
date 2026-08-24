@@ -3,8 +3,10 @@ import type { TokenAcquiredPayload } from '../../types/events'
 import type { NpuModule, ModuleApi, PageContext } from '../../types/modules'
 import {
   ACCESS_REFRESH_BUFFER_S,
+  SESSION_EXPIRATION_KEYS,
   SESSION_REFRESH_BUFFER_S,
   SESSION_STORAGE_KEYS,
+  readSessionExpiresAt,
 } from '../../types/neptun-api'
 
 type RefreshReason = 'access-token' | 'session-timeout'
@@ -18,13 +20,24 @@ interface RefreshDecision {
 
 function getStoredRefreshExpiresAt(): number {
   try {
-    const expStr = sessionStorage.getItem(SESSION_STORAGE_KEYS.refreshTokenExpiration)
-    if (!expStr) return 0
-    const expMs = Date.parse(expStr)
-    return Number.isFinite(expMs) ? expMs : 0
+    return readSessionExpiresAt(sessionStorage)
   } catch {
     return 0
   }
+}
+
+/** The raw session deadline string, whichever build's key currently holds it. */
+function readStoredSessionExpirationRaw(): string | null {
+  for (const key of SESSION_EXPIRATION_KEYS) {
+    try {
+      const raw = sessionStorage.getItem(key)
+      if (raw) return raw
+    } catch {
+      return null
+    }
+  }
+
+  return null
 }
 
 function formatRemaining(ms: number): string {
@@ -69,15 +82,8 @@ function getExistingTokenPayload(): TokenAcquiredPayload | null {
     const expiresAt = jwt.exp * 1000
     if (!Number.isFinite(expiresAt)) return null
 
-    const refreshExpiration = sessionStorage.getItem(SESSION_STORAGE_KEYS.refreshTokenExpiration)
-
-    let refreshExpiresAt = 0
-    if (refreshExpiration) {
-      const parsed = Date.parse(refreshExpiration)
-      if (Number.isFinite(parsed)) {
-        refreshExpiresAt = parsed
-      }
-    }
+    const refreshExpiration = readStoredSessionExpirationRaw()
+    const refreshExpiresAt = readSessionExpiresAt(sessionStorage)
 
     return {
       accessToken,

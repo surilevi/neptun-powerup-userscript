@@ -220,6 +220,55 @@ describe('Neptun timetable planner DOM adapter', () => {
     })
   })
 
+  /**
+   * Observed live on 2026-08-24 (Neptun 2026.2.9): a cold Preview Planner run
+   * reported 5/6 subjects ready while an immediate warm re-run reported 6/6 on
+   * the exact same planner. Rows render before Neptun marks which of them the
+   * planner holds, so waiting for rows alone snapshots an empty selection and
+   * silently drops that subject. Course Rush runs once and disables itself, so
+   * there is no warm second run to save it during a registration rush.
+   */
+  it('waits for planner selection state to settle after the course rows render', async () => {
+    document.body.innerHTML = `
+      <neptun-timetable-planner>
+        <neptun-timetable-planner-list-view>
+          <neptun-subject-list-item>
+            <mat-expansion-panel class="mat-expanded">
+              <mat-expansion-panel-header>Late selection BMEVIAUAC00</mat-expansion-panel-header>
+              <button>Enroll subject</button>
+              <div class="course-list-item-container">
+                <div class="code-with-time"><h6 class="h6-unformatted">A1</h6></div>
+                <input type="checkbox">
+              </div>
+            </mat-expansion-panel>
+          </neptun-subject-list-item>
+        </neptun-timetable-planner-list-view>
+      </neptun-timetable-planner>
+    `
+
+    // The row is present from the first poll; only its selection arrives late,
+    // well after the point where waiting on rows alone would have read the panel.
+    window.setTimeout(() => {
+      const row = document.querySelector('.course-list-item-container')
+      row?.classList.add('course-list-item-container--selected')
+      row?.querySelector('input')?.setAttribute('checked', '')
+    }, 1_500)
+
+    const snapshot = await collectPlannerSnapshot({
+      entryPointTimeoutMs: 100,
+      contentTimeoutMs: 6_000,
+    })
+
+    expect(snapshot.contentReady).toBe(true)
+    expect(snapshot.subjects).toHaveLength(1)
+    expect(snapshot.subjects[0]).toMatchObject({
+      subjectCode: 'BMEVIAUAC00',
+      courseCodes: ['A1'],
+      available: true,
+    })
+    expect(snapshot.issues).toEqual([])
+  })
+
   it('does not report an empty planner while its list content is still unresolved', async () => {
     document.body.innerHTML = `
       <neptun-timetable-planner-list-view></neptun-timetable-planner-list-view>

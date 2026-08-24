@@ -160,6 +160,58 @@ describe('course-store subject and course extraction', () => {
     expect(extractCourseCode(item)).toBe('AG')
   })
 
+  it('prefers the plain heading over the spelled-out screen-reader copy (Neptun 2026.2.9)', () => {
+    const item = document.createElement('div')
+    item.className = 'course-list-item-container'
+    item.innerHTML = `
+      <div class="checkbox">
+        <mat-checkbox class="mat-mdc-checkbox">
+          <div class="mdc-form-field">
+            <label class="mdc-label"></label>
+          </div>
+        </mat-checkbox>
+      </div>
+      <div class="code-with-time">
+        <h6 class="cdk-visually-hidden">Kurzuskod: A E 1</h6>
+        <h6 class="h6-unformatted">AE1</h6>
+        <div>Hetfo 14:15-16:00</div>
+      </div>
+      <span>Tipus: Elmelet</span>
+      <span>0 fo / 999 limit</span>
+    `
+
+    expect(extractCourseCode(item)).toBe('AE1')
+  })
+
+  it('extracts single-letter 2026.2.9 course codes without picking up the label text', () => {
+    const item = document.createElement('div')
+    item.className = 'course-list-item-container'
+    item.innerHTML = `
+      <div class="code-with-time">
+        <h6 class="cdk-visually-hidden">Kurzuskod: G</h6>
+        <h6 class="h6-unformatted">G</h6>
+        <div>Szerda 16:15-18:00</div>
+      </div>
+      <span>Tipus: Gyakorlat</span>
+    `
+
+    expect(extractCourseCode(item)).toBe('G')
+  })
+
+  it('never derives a course code from screen-reader-only text alone', () => {
+    const item = document.createElement('div')
+    item.className = 'course-list-item-container'
+    item.innerHTML = `
+      <div class="code-with-time">
+        <h6 class="cdk-visually-hidden">Kurzuskod: A E 1</h6>
+        <div>Hetfo 14:15-16:00</div>
+      </div>
+      <span>Tipus: Elmelet</span>
+    `
+
+    expect(extractCourseCode(item)).toBeNull()
+  })
+
   it('finds a subject panel by its extracted subject code', () => {
     document.body.innerHTML = `
       <mat-expansion-panel>
