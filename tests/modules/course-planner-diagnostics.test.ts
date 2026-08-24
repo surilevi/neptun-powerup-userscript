@@ -71,4 +71,50 @@ describe('planner diagnostics', () => {
     expect(logLines.join('\n')).not.toContain('ABC12DE345')
     expect(logLines.join('\n')).not.toContain('NE1')
   })
+
+  /**
+   * Course Rush asks for twice the interactive readiness budget because it runs
+   * against slow login-time rendering. The empty-selection grace is the wait that
+   * decides whether a not-yet-applied planner selection is believed to be empty,
+   * so it has to scale with that budget instead of staying a flat number.
+   */
+  it('scales the empty-selection grace with the readiness budget', async () => {
+    const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
+
+    const renderPlanner = () => {
+      document.body.innerHTML = `
+        <neptun-timetable-planner-list-view>
+          <neptun-subject-list-item>
+            <mat-expansion-panel class="mat-expanded">
+              <mat-expansion-panel-header>Subject BMEVIAUAC00</mat-expansion-panel-header>
+              <button>Enroll subject</button>
+              <div class="course-list-item-container course-list-item-container--selected">
+                <div class="code-with-time"><h6 class="h6-unformatted">A1</h6></div>
+              </div>
+            </mat-expansion-panel>
+          </neptun-subject-list-item>
+        </neptun-timetable-planner-list-view>
+      `
+    }
+
+    const graceFromLastRun = (): number => {
+      const line = consoleSpy.mock.calls
+        .map(([entry]) => String(entry))
+        .find((entry) => entry.includes('course-rows:waiting'))
+      return Number(/emptySelectionGraceMs=(\d+)/.exec(line ?? '')?.[1])
+    }
+
+    renderPlanner()
+    await collectPlannerSnapshot({ entryPointTimeoutMs: 100, contentTimeoutMs: 30_000 })
+    const interactiveGrace = graceFromLastRun()
+
+    consoleSpy.mockClear()
+    renderPlanner()
+    await collectPlannerSnapshot({ entryPointTimeoutMs: 100, contentTimeoutMs: 60_000 })
+    const rushGrace = graceFromLastRun()
+
+    expect(interactiveGrace).toBe(3_000)
+    expect(rushGrace).toBe(6_000)
+    expect(rushGrace).toBeGreaterThan(interactiveGrace)
+  })
 })

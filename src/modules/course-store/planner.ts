@@ -599,10 +599,16 @@ export async function collectPlannerSnapshot(
     expectedSelectedBySubject.set(planned.code, planned.scheduledCourseIds.length)
   }
 
+  const emptySelectionGraceMs = Math.max(
+    PLANNER_TIMING.emptySelectionGraceMinMs,
+    Math.round(contentTimeoutMs * PLANNER_TIMING.emptySelectionGraceRatio),
+  )
+
   diagnostics.log('course-rows:waiting', {
     timeoutMs: contentTimeoutMs,
     expectationSource: expectedSelectedBySubject.size > 0 ? 'api' : 'stability',
     stabilityWindowMs: PLANNER_TIMING.courseSelectionStabilityWindowMs,
+    emptySelectionGraceMs,
   })
 
   const readSelectionSignature = (): string =>
@@ -611,7 +617,7 @@ export async function collectPlannerSnapshot(
       .join('|')
 
   const waitStartedAt = Date.now()
-  const emptySelectionDeadline = waitStartedAt + PLANNER_TIMING.emptySelectionGraceMs
+  const emptySelectionDeadline = waitStartedAt + emptySelectionGraceMs
   let lastSignature = readSelectionSignature()
   let signatureStableSince = Date.now()
 

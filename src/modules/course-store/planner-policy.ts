@@ -45,8 +45,15 @@ export const PLANNER_TIMING = Object.freeze({
    * so a stability window alone cannot catch a late selection. Only used when the
    * planner API gave no per-subject count to compare against; an already
    * registered subject legitimately reaches this deadline.
+   *
+   * Expressed as a share of the run's own readiness budget rather than a flat
+   * number: Course Rush already asks for twice the interactive budget because it
+   * runs against slow login-time rendering, and this wait deserves the same
+   * allowance. The floor keeps short-budget callers (and tests) from collapsing
+   * it to nothing.
    */
-  emptySelectionGraceMs: 3_000,
+  emptySelectionGraceRatio: 0.1,
+  emptySelectionGraceMinMs: 3_000,
 
   /** Panel body render budget after a header click. */
   panelExpandTimeoutMs: 5_000,
