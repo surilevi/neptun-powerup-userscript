@@ -109,23 +109,45 @@ function getVisibleDialogs(): Element[] {
   ).filter((dialog) => isElementAvailable(dialog) && isEnrollmentConfirmationDialog(dialog))
 }
 
+/**
+ * Where Neptun renders the toast that explains an enrollment result.
+ *
+ * 2026.2.11 moved these into its own `neptun-push-notifications` component,
+ * which carries no `aria-live` and sits in no overlay pane — so the original
+ * Material selectors matched nothing and every failure lost its explanation.
+ * Verified live on 2026-08-26: `.cdk-overlay-pane` matched 0 elements while the
+ * only `aria-live` hits were empty form-field hints and the CDK announcer.
+ * The older selectors stay for portals that have not moved yet.
+ */
+const NOTIFICATION_SELECTOR = [
+  'neptun-push-notifications',
+  '.push-notifications-wrapper',
+  '.push-notifications',
+  '.cdk-overlay-pane',
+  '[role="status"]',
+  '[role="alert"]',
+  '[aria-live="polite"]',
+  '[aria-live="assertive"]',
+].join(', ')
+
 function getVisibleNotificationState(): string {
-  return Array.from(
-    document.querySelectorAll<HTMLElement>(
-      '.cdk-overlay-pane, [role="status"], [aria-live="polite"], [aria-live="assertive"]',
-    ),
-  )
+  const texts = Array.from(document.querySelectorAll<HTMLElement>(NOTIFICATION_SELECTOR))
     .filter((element) => isElementAvailable(element) && !isEnrollmentConfirmationDialog(element))
     .map((element) => normalizeDialogText(element.textContent ?? ''))
     .filter(Boolean)
-    .join('|')
+
+  // The host element commonly carries the wrapper class too, so the same toast
+  // matches more than once. Deduplicate, or one notification reads as several.
+  return Array.from(new Set(texts)).join('|')
 }
 
-function isFailureNotification(text: string): boolean {
-  return ['sikertelen', 'failed', 'hiba', 'error', 'nincs targyjelentkezesi idoszak'].some(
-    (marker) => text.includes(marker),
-  )
-}
+const FAILURE_NOTIFICATION_MARKERS = [
+  'sikertelen',
+  'failed',
+  'hiba',
+  'error',
+  'nincs targyjelentkezesi idoszak',
+] as const
 
 /**
  * Conditions that apply to the whole run, not to one subject.
@@ -138,11 +160,7 @@ const RUN_FATAL_NOTIFICATION_MARKERS = [
   'nincs targyjelentkezesi idoszak',
   'no subject registration period',
   'lejart a targyjelentkezesi idoszak',
-]
-
-function isRunFatalNotification(text: string): boolean {
-  return RUN_FATAL_NOTIFICATION_MARKERS.some((marker) => text.includes(marker))
-}
+] as const
 
 /**
  * Wait briefly for Neptun to render the notification explaining a failure.
@@ -173,9 +191,45 @@ type FailureClassification = 'run-fatal' | 'rejected' | 'retryable'
  * a genuinely overloaded server both surface as 5xx — so the notification text
  * decides, and only a status with no explanation is assumed transient.
  */
-function classifyFailure(status: number | null, notification: string): FailureClassification {
-  if (isRunFatalNotification(notification)) return 'run-fatal'
-  if (isFailureNotification(notification)) return 'rejected'
+/**
+ * Count how often any marker appears, so two readings can be compared.
+ *
+ * Neptun 2026.2.11 keeps every result in an "Értesítések" tray that does not
+ * auto-dismiss — six messages from an earlier attempt were still present seven
+ * minutes later. Asking whether a marker is *present* would therefore let one
+ * stale "nincs tárgyjelentkezési időszak" abort a later run in an open period,
+ * so what matters is whether this click added one.
+ */
+function countMarkerOccurrences(text: string, markers: readonly string[]): number {
+  let total = 0
+
+  for (const marker of markers) {
+    if (!marker) continue
+    let index = text.indexOf(marker)
+    while (index !== -1) {
+      total++
+      index = text.indexOf(marker, index + marker.length)
+    }
+  }
+
+  return total
+}
+
+function addedMarker(before: string, after: string, markers: readonly string[]): boolean {
+  return countMarkerOccurrences(after, markers) > countMarkerOccurrences(before, markers)
+}
+
+function classifyFailure(
+  status: number | null,
+  notificationBefore: string,
+  notificationAfter: string,
+): FailureClassification {
+  if (addedMarker(notificationBefore, notificationAfter, RUN_FATAL_NOTIFICATION_MARKERS)) {
+    return 'run-fatal'
+  }
+  if (addedMarker(notificationBefore, notificationAfter, FAILURE_NOTIFICATION_MARKERS)) {
+    return 'rejected'
+  }
   if (status === 429 || status === 502 || status === 503 || status === 504) return 'retryable'
   return 'rejected'
 }
@@ -242,7 +296,7 @@ async function waitForPlannerUiOutcome(
     const notificationState = getVisibleNotificationState()
     if (
       notificationState !== notificationStateBeforeClick &&
-      isFailureNotification(notificationState)
+      addedMarker(notificationStateBeforeClick, notificationState, FAILURE_NOTIFICATION_MARKERS)
     ) {
       return 'failure-notification'
     }
@@ -391,7 +445,11 @@ async function enrollSingleSubject(
       // Neptun explains the refusal in a notification rather than in the status
       // code, so read it before deciding whether another attempt is warranted.
       const notification = await waitForNewNotification(notificationStateBeforeClick)
-      const classification = classifyFailure(outcome.status, notification)
+      const classification = classifyFailure(
+        outcome.status,
+        notificationStateBeforeClick,
+        notification,
+      )
       diagnostics.log('target:failure-classified', {
         targetIndex,
         attempt,
