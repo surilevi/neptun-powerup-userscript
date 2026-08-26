@@ -109,16 +109,36 @@ function getVisibleDialogs(): Element[] {
   ).filter((dialog) => isElementAvailable(dialog) && isEnrollmentConfirmationDialog(dialog))
 }
 
+/**
+ * Where Neptun renders the toast that explains an enrollment result.
+ *
+ * 2026.2.11 moved these into its own `neptun-push-notifications` component,
+ * which carries no `aria-live` and sits in no overlay pane — so the original
+ * Material selectors matched nothing and every failure lost its explanation.
+ * Verified live on 2026-08-26: `.cdk-overlay-pane` matched 0 elements while the
+ * only `aria-live` hits were empty form-field hints and the CDK announcer.
+ * The older selectors stay for portals that have not moved yet.
+ */
+const NOTIFICATION_SELECTOR = [
+  'neptun-push-notifications',
+  '.push-notifications-wrapper',
+  '.push-notifications',
+  '.cdk-overlay-pane',
+  '[role="status"]',
+  '[role="alert"]',
+  '[aria-live="polite"]',
+  '[aria-live="assertive"]',
+].join(', ')
+
 function getVisibleNotificationState(): string {
-  return Array.from(
-    document.querySelectorAll<HTMLElement>(
-      '.cdk-overlay-pane, [role="status"], [aria-live="polite"], [aria-live="assertive"]',
-    ),
-  )
+  const texts = Array.from(document.querySelectorAll<HTMLElement>(NOTIFICATION_SELECTOR))
     .filter((element) => isElementAvailable(element) && !isEnrollmentConfirmationDialog(element))
     .map((element) => normalizeDialogText(element.textContent ?? ''))
     .filter(Boolean)
-    .join('|')
+
+  // The host element commonly carries the wrapper class too, so the same toast
+  // matches more than once. Deduplicate, or one notification reads as several.
+  return Array.from(new Set(texts)).join('|')
 }
 
 function isFailureNotification(text: string): boolean {

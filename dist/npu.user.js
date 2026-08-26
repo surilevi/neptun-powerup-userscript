@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Neptun PowerUp! Userscript
 // @namespace    https://github.com/surilevi/neptun-powerup-userscript
-// @version      3.5.1
+// @version      3.5.2
 // @author       surilevi
 // @description  Neptun PowerUp! userscript for course and exam workflows
 // @license      MIT
@@ -3472,8 +3472,19 @@ mat-expansion-panel {
 	function getVisibleDialogs() {
 		return Array.from(document.querySelectorAll("[role=\"dialog\"], mat-dialog-container, .mat-mdc-dialog-container")).filter((dialog) => isElementAvailable(dialog) && isEnrollmentConfirmationDialog(dialog));
 	}
+	var NOTIFICATION_SELECTOR = [
+		"neptun-push-notifications",
+		".push-notifications-wrapper",
+		".push-notifications",
+		".cdk-overlay-pane",
+		"[role=\"status\"]",
+		"[role=\"alert\"]",
+		"[aria-live=\"polite\"]",
+		"[aria-live=\"assertive\"]"
+	].join(", ");
 	function getVisibleNotificationState() {
-		return Array.from(document.querySelectorAll(".cdk-overlay-pane, [role=\"status\"], [aria-live=\"polite\"], [aria-live=\"assertive\"]")).filter((element) => isElementAvailable(element) && !isEnrollmentConfirmationDialog(element)).map((element) => normalizeDialogText(element.textContent ?? "")).filter(Boolean).join("|");
+		const texts = Array.from(document.querySelectorAll(NOTIFICATION_SELECTOR)).filter((element) => isElementAvailable(element) && !isEnrollmentConfirmationDialog(element)).map((element) => normalizeDialogText(element.textContent ?? "")).filter(Boolean);
+		return Array.from(new Set(texts)).join("|");
 	}
 	function isFailureNotification(text) {
 		return [

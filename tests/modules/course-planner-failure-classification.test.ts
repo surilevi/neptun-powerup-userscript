@@ -162,4 +162,49 @@ describe('enrollment failure classification', () => {
 
     expect(clicks.filter((code) => code === 'ABC12DE345')).toHaveLength(3)
   }, 20_000)
+
+  /**
+   * Neptun 2026.2.11 renders result toasts in its own `neptun-push-notifications`
+   * component, which carries no `aria-live` and lives in no overlay pane.
+   * Verified live on 2026-08-26: the previous Material selectors matched nothing,
+   * so every failure lost its explanation. A real run then clicked all six
+   * planned subjects with registration closed instead of stopping at the first,
+   * and Course Rush disabled itself afterwards with nothing enrolled.
+   */
+  it('reads the run-fatal reason from the 2026.2.11 push-notification host', async () => {
+    const clicks: string[] = []
+    const requests: PerformanceResourceTiming[] = []
+    vi.spyOn(performance, 'getEntriesByType').mockImplementation(
+      () => requests as PerformanceEntryList,
+    )
+
+    for (const [selector, code] of [
+      ['.enroll-first', 'ABC12DE345'],
+      ['.enroll-second', 'XYZ98FG765'],
+    ] as const) {
+      document.querySelector<HTMLButtonElement>(selector)?.addEventListener('click', () => {
+        clicks.push(code)
+        requests.push({
+          name: 'https://example.test/SubjectApplication/SubjectSignin',
+          startTime: performance.now(),
+          responseStatus: 500,
+        } as PerformanceResourceTiming)
+
+        // The live host carries the wrapper class on the element itself.
+        let host = document.querySelector('neptun-push-notifications')
+        if (!host) {
+          host = document.createElement('neptun-push-notifications')
+          host.className = 'push-notifications'
+          document.body.appendChild(host)
+        }
+        host.textContent = 'Sikertelen Jelenleg nincs tárgyjelentkezési időszak!'
+      })
+    }
+
+    const result = await enrollPlannedCourses()
+
+    expect(clicks).toEqual(['ABC12DE345'])
+    expect(result.aborted).toBe(true)
+    expect(result.enrolled).toBe(0)
+  })
 })
