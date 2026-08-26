@@ -3486,23 +3486,18 @@ mat-expansion-panel {
 		const texts = Array.from(document.querySelectorAll(NOTIFICATION_SELECTOR)).filter((element) => isElementAvailable(element) && !isEnrollmentConfirmationDialog(element)).map((element) => normalizeDialogText(element.textContent ?? "")).filter(Boolean);
 		return Array.from(new Set(texts)).join("|");
 	}
-	function isFailureNotification(text) {
-		return [
-			"sikertelen",
-			"failed",
-			"hiba",
-			"error",
-			"nincs targyjelentkezesi idoszak"
-		].some((marker) => text.includes(marker));
-	}
+	var FAILURE_NOTIFICATION_MARKERS = [
+		"sikertelen",
+		"failed",
+		"hiba",
+		"error",
+		"nincs targyjelentkezesi idoszak"
+	];
 	var RUN_FATAL_NOTIFICATION_MARKERS = [
 		"nincs targyjelentkezesi idoszak",
 		"no subject registration period",
 		"lejart a targyjelentkezesi idoszak"
 	];
-	function isRunFatalNotification(text) {
-		return RUN_FATAL_NOTIFICATION_MARKERS.some((marker) => text.includes(marker));
-	}
 	async function waitForNewNotification(notificationStateBeforeClick, timeoutMs = PLANNER_TIMING.notificationSettleMs) {
 		const startedAt = Date.now();
 		while (Date.now() - startedAt < timeoutMs) {
@@ -3512,9 +3507,24 @@ mat-expansion-panel {
 		}
 		return getVisibleNotificationState();
 	}
-	function classifyFailure(status, notification) {
-		if (isRunFatalNotification(notification)) return "run-fatal";
-		if (isFailureNotification(notification)) return "rejected";
+	function countMarkerOccurrences(text, markers) {
+		let total = 0;
+		for (const marker of markers) {
+			if (!marker) continue;
+			let index = text.indexOf(marker);
+			while (index !== -1) {
+				total++;
+				index = text.indexOf(marker, index + marker.length);
+			}
+		}
+		return total;
+	}
+	function addedMarker(before, after, markers) {
+		return countMarkerOccurrences(after, markers) > countMarkerOccurrences(before, markers);
+	}
+	function classifyFailure(status, notificationBefore, notificationAfter) {
+		if (addedMarker(notificationBefore, notificationAfter, RUN_FATAL_NOTIFICATION_MARKERS)) return "run-fatal";
+		if (addedMarker(notificationBefore, notificationAfter, FAILURE_NOTIFICATION_MARKERS)) return "rejected";
 		if (status === 429 || status === 502 || status === 503 || status === 504) return "retryable";
 		return "rejected";
 	}
@@ -3552,7 +3562,7 @@ mat-expansion-panel {
 		while (Date.now() - startedAt < timeoutMs) {
 			if (!hasVisibleEnrollmentAction(subjectCode)) return "updated";
 			const notificationState = getVisibleNotificationState();
-			if (notificationState !== notificationStateBeforeClick && isFailureNotification(notificationState)) return "failure-notification";
+			if (notificationState !== notificationStateBeforeClick && addedMarker(notificationStateBeforeClick, notificationState, FAILURE_NOTIFICATION_MARKERS)) return "failure-notification";
 			await delay(PLANNER_TIMING.outcomePollIntervalMs);
 		}
 		return "timeout";
@@ -3636,7 +3646,7 @@ mat-expansion-panel {
 			}
 			if (outcome.status !== null && outcome.status >= 400) {
 				const notification = await waitForNewNotification(notificationStateBeforeClick);
-				const classification = classifyFailure(outcome.status, notification);
+				const classification = classifyFailure(outcome.status, notificationStateBeforeClick, notification);
 				diagnostics.log("target:failure-classified", {
 					targetIndex,
 					attempt,

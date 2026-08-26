@@ -207,4 +207,47 @@ describe('enrollment failure classification', () => {
     expect(result.aborted).toBe(true)
     expect(result.enrolled).toBe(0)
   })
+
+  /**
+   * The 2026.2.11 "Értesítések" tray does not auto-dismiss: six messages from an
+   * earlier attempt were still on screen seven minutes later, verified live on
+   * 2026-08-26. Asking whether a run-fatal marker is *present* would therefore
+   * let one stale "nincs tárgyjelentkezési időszak" from a closed period abort a
+   * later run once the period is open. Only a marker this click added counts.
+   */
+  it('ignores a stale run-fatal notification left over from an earlier attempt', async () => {
+    const stale = document.createElement('neptun-push-notifications')
+    stale.className = 'push-notifications'
+    stale.textContent =
+      'Értesítések Sikertelen Jelenleg nincs tárgyjelentkezési időszak! Sikertelen Jelenleg nincs tárgyjelentkezési időszak!'
+    document.body.appendChild(stale)
+
+    const clicks: string[] = []
+    const requests: PerformanceResourceTiming[] = []
+    vi.spyOn(performance, 'getEntriesByType').mockImplementation(
+      () => requests as PerformanceEntryList,
+    )
+
+    for (const [selector, code] of [
+      ['.enroll-first', 'ABC12DE345'],
+      ['.enroll-second', 'XYZ98FG765'],
+    ] as const) {
+      document.querySelector<HTMLButtonElement>(selector)?.addEventListener('click', () => {
+        clicks.push(code)
+        requests.push({
+          name: 'https://example.test/SubjectApplication/SubjectSignin',
+          startTime: performance.now(),
+          responseStatus: 500,
+        } as PerformanceResourceTiming)
+        // This attempt's own reason is a plain per-subject rejection.
+        stale.textContent += ' Sikertelen: a kurzus létszámkorlátja betelt.'
+      })
+    }
+
+    const result = await enrollPlannedCourses()
+
+    // The stale marker must not abort the run: both subjects are still tried.
+    expect(clicks).toEqual(['ABC12DE345', 'XYZ98FG765'])
+    expect(result.aborted).toBe(false)
+  })
 })
